@@ -126,7 +126,7 @@ public static class PhotoDecoder
     {
         var result = new byte[width * height * 4];
         for (var row = 0; row < height; row++)
-            Buffer.BlockCopy(photo.Pixels, ((y + row) * photo.Width + x) * 4, result, row * width * 4, width * 4);
+            System.Buffer.BlockCopy(photo.Pixels, ((y + row) * photo.Width + x) * 4, result, row * width * 4, width * 4);
         return result;
     }
 
