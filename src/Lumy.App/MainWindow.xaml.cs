@@ -315,7 +315,7 @@ public sealed partial class MainWindow : Window
         LoupeName.Text = item.FileName;
         LoupeDetails.Text = item.Record.CapturedAt is { } taken ? $"{item.FormatLabel}  ·  {taken:dd.MM.yyyy HH:mm:ss}" : item.FormatLabel;
         LoupePosition.Text = $"{_loupeIndex + 1} / {_visible.Count}";
-        LoupeTierIcon.Glyph = item.Tier == Tier.None ? "" : item.TierGlyph; // empty heart when unrated
+        LoupeTierIcon.Glyph = item.Tier == Tier.None ? "\uEB51" : item.TierGlyph; // empty heart when unrated
         LoupeTierIcon.Foreground = item.TierBrush ?? (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
     }
 
@@ -442,7 +442,7 @@ public sealed partial class MainWindow : Window
 
     private void Flash(Tier tier)
     {
-        FlashIcon.Glyph = tier == Tier.None ? "" : PhotoItem.GlyphFor(tier);
+        FlashIcon.Glyph = tier == Tier.None ? "\uEB51" : PhotoItem.GlyphFor(tier);
         FlashIcon.Foreground = PhotoItem.BrushFor(tier) ?? (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
         FlashBadge.Opacity = 1;
         _flashTimer.Stop();

@@ -76,9 +76,9 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
 
     public static string GlyphFor(Tier tier) => tier switch
     {
-        Tier.Like => "",      // HeartFill
-        Tier.SuperLike => "", // FavoriteStarFill
-        Tier.Rejected => "",  // Cancel
+        Tier.Like => "\uEB52",      // HeartFill
+        Tier.SuperLike => "\uE735", // FavoriteStarFill
+        Tier.Rejected => "\uE711",  // Cancel
         _ => "",
     };
 
