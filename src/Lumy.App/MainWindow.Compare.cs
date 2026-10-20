@@ -219,7 +219,10 @@ public sealed partial class MainWindow
     private sealed class CompareCell
     {
         private readonly MainWindow _owner;
-        private readonly Image _image = new() { Stretch = Stretch.Uniform };
+        private readonly Image _image = new() { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+
+        // Like the viewer: a canvas the size of the cell holds the photo centred, and zooming scales the canvas.
+        private readonly Grid _canvas = new() { Background = new SolidColorBrush(Colors.Transparent) };
         private readonly TextBlock _number = new() { FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         private readonly FontIcon _tier = new() { FontSize = 14 };
         private int _decodedWidth;
@@ -237,12 +240,13 @@ public sealed partial class MainWindow
                 VerticalScrollMode = ScrollMode.Enabled,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
-                Content = _image,
+                Content = _canvas,
             };
+            _canvas.Children.Add(_image);
             Scroll.SizeChanged += (_, e) =>
             {
-                _image.Width = e.NewSize.Width;
-                _image.Height = e.NewSize.Height;
+                _canvas.Width = e.NewSize.Width;
+                _canvas.Height = e.NewSize.Height;
             };
             Scroll.ViewChanged += (_, _) => _owner.OnCompareViewChanged(this);
 
@@ -289,6 +293,20 @@ public sealed partial class MainWindow
 
         /// <summary>Width / height of the decoded photo, once known.</summary>
         public double? Aspect { get; private set; }
+
+        /// <summary>The photo has the same gap on both sides inside its cell.</summary>
+        public bool IsCentred()
+        {
+            if (_image.ActualWidth <= 0 || Scroll.ActualWidth <= 0)
+                return false;
+
+            var origin = _image.TransformToVisual(Scroll).TransformPoint(new Windows.Foundation.Point(0, 0));
+            var left = origin.X;
+            var right = Scroll.ActualWidth - (origin.X + _image.ActualWidth);
+            var top = origin.Y;
+            var bottom = Scroll.ActualHeight - (origin.Y + _image.ActualHeight);
+            return Math.Abs(left - right) <= 2 && Math.Abs(top - bottom) <= 2;
+        }
 
         public void SetNumber(int n) => _number.Text = n.ToString();
 

@@ -99,6 +99,7 @@ public sealed partial class MainWindow
                 StartCompare();
                 await Task.Delay(1500);
                 Check(InCompare && _compareCells.Count >= 2, "compare opens with the selection");
+                Check(_compareCells.All(c => c.IsCentred()), "compare photos are centred in their cells");
                 CloseCompare();
             }
 
