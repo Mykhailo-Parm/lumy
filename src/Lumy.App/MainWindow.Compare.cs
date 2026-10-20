@@ -26,7 +26,10 @@ public sealed partial class MainWindow
         List<PhotoItem> photos;
         if (InLoupe)
         {
-            photos = _loupeIndex >= 0 && _loupeIndex < _visible.Count ? SeriesOf(_visible[_loupeIndex]) : [];
+            // Photos picked in the filmstrip with Ctrl/Shift win; otherwise the open photo's series.
+            var picked = FilmstripPicks();
+            photos = picked.Count >= 2 ? picked
+                : _loupeIndex >= 0 && _loupeIndex < _visible.Count ? SeriesOf(_visible[_loupeIndex]) : [];
         }
         else
         {
@@ -34,9 +37,14 @@ public sealed partial class MainWindow
             photos = selected.Count >= 2 ? selected : selected.Count == 1 ? SeriesOf(selected[0]) : [];
         }
 
+        ComparePhotos(photos);
+    }
+
+    private void ComparePhotos(List<PhotoItem> photos)
+    {
         if (photos.Count < 2)
         {
-            ShowToast("Выделите 2–9 фото (Ctrl + клик) или фото из серии");
+            ShowToast(InLoupe ? "Выберите 2–9 фото в ленте (Shift или Ctrl + клик) или откройте фото из серии" : "Выделите 2–9 фото (Ctrl + клик) или фото из серии");
             return;
         }
 

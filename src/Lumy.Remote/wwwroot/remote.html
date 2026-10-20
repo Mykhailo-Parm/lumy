@@ -34,6 +34,8 @@
   #detail { color: var(--muted); padding: 0 2px 8px; min-height: 22px; font-size: 13px; }
   .row { display: grid; gap: 10px; margin-bottom: 10px; }
   .rate { grid-template-columns: repeat(3, 1fr); }
+  .duel { grid-template-columns: repeat(2, 1fr); }
+  .row[hidden] { display: none; }
   .tools { grid-template-columns: repeat(4, 1fr); }
   button { appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--text);
     border-radius: 14px; padding: 12px 6px; font: inherit; font-size: 14px; touch-action: manipulation; }
@@ -58,7 +60,11 @@
   <div class="info"><span id="tier"></span><span id="name"></span><span id="pos"></span></div>
   <div id="detail"></div>
 
-  <div class="row rate">
+  <div class="row duel" id="duelRow" hidden>
+    <button class="big" data-cmd="prev">◀ Левое</button>
+    <button class="big" data-cmd="next">Правое ▶</button>
+  </div>
+  <div class="row rate" id="rateRow">
     <button class="big reject" data-cmd="reject" aria-label="Отказ">✕</button>
     <button class="big super" data-cmd="super" aria-label="Суперлайк">★</button>
     <button class="big like" data-cmd="like" aria-label="Лайк">♥</button>
@@ -77,7 +83,7 @@
   const $ = id => document.getElementById(id);
   const glyph = { like: '♥', superLike: '★', rejected: '✕', none: '' };
   const tierClass = { like: 'like', superLike: 'super', rejected: 'reject', none: '' };
-  const modeName = { empty: 'нет фото', gallery: 'галерея', loupe: 'просмотр', swipe: 'свайп', 'swipe-done': 'свайп завершён', compare: 'сравнение' };
+  const modeName = { empty: 'нет фото', gallery: 'галерея', loupe: 'просмотр', swipe: 'свайп', 'swipe-done': 'свайп завершён', compare: 'сравнение', tournament: 'турнир' };
   let socket, state = { mode: 'empty' }, retry = 500, shownId = null;
 
   function connect() {
@@ -105,7 +111,9 @@
     $('empty').style.display = s.photoId == null ? 'flex' : 'none';
     $('empty').textContent = s.mode === 'swipe-done'
       ? `Готово: ♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}`
-      : s.mode === 'compare' ? 'Сейчас на компьютере сравнение, управляйте им мышью' : 'Откройте папку с фото в Lumy на компьютере';
+      : s.mode === 'compare' ? 'Сейчас на компьютере сравнение, управляйте им мышью'
+      : s.mode === 'tournament' ? 'Идёт турнир. Кнопками ниже выбирайте фото, которое лучше'
+      : 'Откройте папку с фото в Lumy на компьютере';
     $('name').textContent = s.fileName || '';
     $('pos').textContent = s.total ? `${s.position} / ${s.total}` : '';
     $('tier').textContent = glyph[s.tier] || '';
@@ -113,7 +121,10 @@
     $('detail').textContent = swipe ? `♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}${s.detail ? ' · ' + s.detail : ''}` : (s.detail || '');
     $('openBtn').textContent = s.mode === 'gallery' ? 'Открыть' : 'Выйти';
     $('openBtn').dataset.cmd = s.mode === 'gallery' ? 'open' : 'back';
-    $('swipeBtn').hidden = swipe;
+    const duel = s.mode === 'tournament';
+    $('duelRow').hidden = !duel;
+    $('rateRow').hidden = duel;
+    $('swipeBtn').hidden = swipe || duel;
     $('zoomBtn').hidden = s.mode !== 'loupe';
     $('tip').textContent = swipe ? 'Свайп по фото: → лайк · ↑ суперлайк · ← отказ · ↓ потом' : 'Свайп по фото: ← → листать';
 
@@ -164,6 +175,7 @@
     const x = dx / w, y = dy / h;
     if (Math.abs(x) < 0.15 && Math.abs(y) < 0.15) return null;
     const swipe = state.mode === 'swipe';
+    if (state.mode === 'tournament') return null; // the two buttons decide; a stray swipe must not
     if (Math.abs(x) >= Math.abs(y)) {
       if (swipe) return x > 0 ? { cmd: 'like', icon: '♥', strength: x } : { cmd: 'reject', icon: '✕', strength: -x };
       return x > 0 ? { cmd: 'prev', icon: '‹', strength: x } : { cmd: 'next', icon: '›', strength: -x };

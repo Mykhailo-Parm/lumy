@@ -15,6 +15,7 @@ namespace Lumy.App;
 public sealed partial class MainWindow
 {
     private readonly Dictionary<long, string?> _details = [];
+    private PhotoItem? _current;
     private ScrollViewer? _filmstripScroll;
     private double? _filmstripTarget;
     private bool _syncingFilmstrip;
@@ -97,21 +98,77 @@ public sealed partial class MainWindow
     private void Filmstrip_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args) =>
         _filmstripThumbnails.OnContainerContentChanging(args);
 
-    private void Filmstrip_ItemClick(object sender, ItemClickEventArgs e)
+    /// <summary>
+    /// A plain click opens the photo. Ctrl + click and Shift + click pick photos instead, as in the gallery,
+    /// and leave the open photo alone; C then compares the picked ones.
+    /// </summary>
+    private void Filmstrip_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (e.ClickedItem is PhotoItem item && _visible.IndexOf(item) is var index and >= 0)
+        foreach (var item in e.RemovedItems.OfType<PhotoItem>())
+            item.IsPicked = false;
+
+        var selected = Filmstrip.SelectedItems.OfType<PhotoItem>().ToList();
+        var picking = selected.Count >= 2;
+        foreach (var item in selected)
+            item.IsPicked = picking;
+
+        if (_syncingFilmstrip)
+            return;
+
+        if (picking)
+        {
+            if (e.AddedItems.Count > 0)
+                ShowToast($"Выбрано {selected.Count}  ·  C — сравнить, клик без Shift — открыть фото");
+            return;
+        }
+
+        if (selected.Count == 1 && _visible.IndexOf(selected[0]) is var index and >= 0 && index != _loupeIndex)
             ShowInLoupe(index);
+    }
+
+    /// <summary>Leaving the viewer forgets the picks and the frame, so the next visit starts clean.</summary>
+    private void ResetFilmstrip()
+    {
+        _syncingFilmstrip = true;
+        Filmstrip.SelectedItems.Clear();
+        _syncingFilmstrip = false;
+        MarkCurrent(null);
+    }
+
+    /// <summary>The photos picked in the filmstrip, in gallery order; empty unless at least two are picked.</summary>
+    private List<PhotoItem> FilmstripPicks()
+    {
+        var picked = Filmstrip.SelectedItems.OfType<PhotoItem>().ToHashSet();
+        return picked.Count >= 2 ? _visible.Where(picked.Contains).ToList() : [];
+    }
+
+    /// <summary>Frames the open photo in the filmstrip.</summary>
+    private void MarkCurrent(PhotoItem? item)
+    {
+        if (_current is not null && _current != item)
+            _current.IsCurrent = false;
+        _current = item;
+        if (item is not null)
+            item.IsCurrent = true;
     }
 
     /// <summary>Marks the open photo in the strip and scrolls it to the middle.</summary>
     private void SyncFilmstrip(int index)
     {
-        if (FilmstripPanel.Visibility != Visibility.Visible || index < 0 || index >= _visible.Count || _syncingFilmstrip)
+        if (index < 0 || index >= _visible.Count || _syncingFilmstrip)
             return;
 
-        _syncingFilmstrip = true;
-        Filmstrip.SelectedIndex = index;
-        _syncingFilmstrip = false;
+        MarkCurrent(_visible[index]);
+        if (FilmstripPanel.Visibility != Visibility.Visible)
+            return;
+
+        // Keep photos picked for comparing; otherwise the selection simply follows the open photo.
+        if (Filmstrip.SelectedItems.Count <= 1)
+        {
+            _syncingFilmstrip = true;
+            Filmstrip.SelectedIndex = index;
+            _syncingFilmstrip = false;
+        }
 
         // After layout, so the strip knows its width the first time the viewer opens.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => CenterFilmstrip(index));

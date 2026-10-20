@@ -144,6 +144,9 @@ public sealed partial class MainWindow
                 : Describe(session.Current!, session.Position, session.Total, counts with { Mode = "swipe" });
         }
 
+        if (InTournament)
+            return new RemoteState { Mode = "tournament", Position = _duel?.Number ?? 0, Total = _tournamentEstimate };
+
         if (InCompare)
             return new RemoteState { Mode = "compare", Total = _compareCells.Count };
 
@@ -172,13 +175,26 @@ public sealed partial class MainWindow
 
     private void HandleRemoteCommand(RemoteCommand command)
     {
-        if (InSwipe)
+        if (InTournament)
+            HandleRemoteTournament(command);
+        else if (InSwipe)
             HandleRemoteSwipe(command);
         else if (InCompare)
             HandleRemoteCompare(command);
         else
             HandleRemoteBrowse(command);
         PushRemoteState();
+    }
+
+    private void HandleRemoteTournament(RemoteCommand command)
+    {
+        switch (command)
+        {
+            case RemoteCommand.Previous: PickDuel(left: true); break;
+            case RemoteCommand.Next: PickDuel(left: false); break;
+            case RemoteCommand.Undo: UndoDuel(); break;
+            case RemoteCommand.Back: _ = CloseTournamentAsync(ask: true); break;
+        }
     }
 
     private void HandleRemoteSwipe(RemoteCommand command)

@@ -114,6 +114,27 @@ public class LibraryDatabaseTests
     }
 
     [Fact]
+    public void Recent_folders_are_newest_first_without_duplicates()
+    {
+        using var db = new LibraryDatabase(":memory:");
+        var settings = new AppSettings(db);
+        Assert.Empty(settings.RecentFolders);
+
+        settings.AddRecentFolder(@"D:\photos\a");
+        settings.AddRecentFolder(@"D:\photos\b");
+        settings.AddRecentFolder(@"d:\Photos\A\");
+        Assert.Equal([@"d:\Photos\A\", @"D:\photos\b"], settings.RecentFolders);
+
+        for (var i = 0; i < 20; i++)
+            settings.AddRecentFolder($@"E:\shoot{i}");
+        Assert.Equal(AppSettings.MaxRecentFolders, settings.RecentFolders.Count);
+        Assert.Equal(@"E:\shoot19", settings.RecentFolders[0]);
+
+        settings.ClearRecentFolders();
+        Assert.Empty(settings.RecentFolders);
+    }
+
+    [Fact]
     public void Persists_to_disk()
     {
         using var folder = new TempFolder();

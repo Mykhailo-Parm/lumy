@@ -70,8 +70,27 @@ public sealed partial class MainWindow
             Check(LoupeScroll.ZoomFactor <= 1.01f, $"Z again fits the photo (zoom {LoupeScroll.ZoomFactor:0.00})");
 
             Check(BuildPhotoMenu(CurrentPhotos()).Items.Count >= 10, "right-click menu has its actions");
+            Check(_visible[_loupeIndex].IsCurrent && _visible.Count(p => p.IsCurrent) == 1, "filmstrip frames the open photo");
+
+            if (_visible.Count >= 3)
+            {
+                var open = _visible[_loupeIndex];
+                var first = Math.Min(_loupeIndex, _visible.Count - 3);
+                Filmstrip.SelectRange(new ItemIndexRange(first, 3));
+                await Task.Delay(300);
+                Check(FilmstripPicks().Count == 3 && _visible[_loupeIndex] == open, "shift-picking in the filmstrip keeps the open photo");
+                StartCompare();
+                await Task.Delay(1500);
+                Check(InCompare && _compareCells.Count == 3, "compare opens with the filmstrip picks");
+                CloseCompare();
+                if (!InLoupe)
+                    OpenLoupe(_visible.IndexOf(open));
+                await Task.Delay(500);
+            }
+
             CloseLoupe();
             Check(!InLoupe, "viewer closes");
+            Check(_all.All(p => !p.IsPicked && !p.IsCurrent), "closing the viewer clears the filmstrip marks");
 
             if (_visible.Count >= 3)
             {
@@ -94,6 +113,34 @@ public sealed partial class MainWindow
             await Task.Delay(400);
             CloseSwipe();
             Check(!InSwipe, "swipe mode closes");
+
+            if (_visible.Count >= 12)
+            {
+                StartTournament(new Tournament<PhotoItem>(_visible.ToList(), 5, p => p.SeriesId));
+                var duels = 0;
+                while (TournamentResult.Visibility != Visibility.Visible && duels < 2000)
+                {
+                    await Task.Delay(20);
+                    if (_duelAnswer is not null)
+                    {
+                        PickDuel(left: duels % 3 != 0);
+                        duels++;
+                    }
+                }
+
+                Check(InTournament && _tournamentWinners.Count == 5, $"tournament finds 5 winners in {duels} duels");
+                UndoDuel();
+                await Task.Delay(500);
+                Check(TournamentDuel.Visibility == Visibility.Visible && _duelAnswer is not null, "undo goes back to the last duel");
+                PickDuel(left: true);
+                await Task.Delay(500);
+                Check(TournamentResult.Visibility == Visibility.Visible && _tournamentWinners.Count == 5, "tournament finishes again after undo");
+                await CloseTournamentAsync(ask: false);
+                Check(!InTournament, "tournament closes");
+            }
+
+            Check(_settings.RecentFolders.FirstOrDefault() == folder, "folder is first in recent folders");
+            Check(FilterBar.Items[0].Text.EndsWith(_all.Count.ToString(), StringComparison.Ordinal), $"filters show counts ({FilterBar.Items[0].Text})");
 
             await Task.Delay(3000);
             Check(Directory.Exists(ThumbnailService.DefaultFolder)

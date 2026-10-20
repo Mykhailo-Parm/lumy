@@ -59,9 +59,10 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        AppWindow.Resize(new SizeInt32(1440, 920));
+        RestoreWindowPlacement();
         Closed += (_, _) =>
         {
+            SaveSession();
             _ = _remote?.StopAsync();
             _database.Dispose();
         };
@@ -69,6 +70,8 @@ public sealed partial class MainWindow : Window
         Gallery.ItemsSource = _visible;
         SetUpViewer();
         SizeSlider.Value = _settings.ThumbnailSize;
+        RestoreSort();
+        RefreshRecentFolders();
         _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); Toast.Opacity = 0; };
         _flashTimer.Tick += (_, _) => { _flashTimer.Stop(); FlashBadge.Opacity = 0; };
         Gallery.SelectionChanged += (_, _) => PushRemoteState();
@@ -130,8 +133,11 @@ public sealed partial class MainWindow : Window
             if (cancellation.IsCancellationRequested)
                 return;
 
+            SaveLastPhoto();
             _folder = folder;
             _settings.LastFolder = folder;
+            _settings.AddRecentFolder(folder);
+            RefreshRecentFolders();
             _loupeCache.Clear();
             _details.Clear();
             _galleryThumbnails.ReleaseAll();
@@ -139,6 +145,7 @@ public sealed partial class MainWindow : Window
             _all = records.Select(r => new PhotoItem(r)).ToList();
             _remotePaths = _all.ToDictionary(p => p.Id, p => p.Path);
             ApplyFilter();
+            RestoreLastPhoto(folder);
             _ = DetectSeriesAsync(_all);
         }
         catch (OperationCanceledException)
@@ -196,6 +203,9 @@ public sealed partial class MainWindow : Window
 
     private void SortBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        // Also fires from InitializeComponent, before the settings exist.
+        if (_settings is not null && !_restoringSort)
+            _settings.Sort = CurrentSort.ToString();
         if (_all.Count == 0)
             return;
 
@@ -209,6 +219,7 @@ public sealed partial class MainWindow : Window
         PushRemoteState();
         if (_all.Count == 0)
         {
+            UpdateFilterCounts(null, null, null, null);
             CounterText.Text = "";
             return;
         }
@@ -225,6 +236,7 @@ public sealed partial class MainWindow : Window
         }
 
         var unrated = _all.Count - likes - supers - rejected;
+        UpdateFilterCounts(likes, supers, rejected, unrated);
         CounterText.Text = $"Отобрано {likes + supers} из {_all.Count}  ·  ★ {supers}  ·  ♥ {likes}  ·  ✕ {rejected}  ·  без оценки {unrated}";
     }
 
@@ -287,6 +299,7 @@ public sealed partial class MainWindow : Window
 
         Loupe.Visibility = Visibility.Collapsed;
         LoupeImage.Source = null;
+        ResetFilmstrip();
         if (_loupeIndex >= 0 && _loupeIndex < _visible.Count)
         {
             Gallery.SelectedIndex = _loupeIndex;
@@ -480,7 +493,9 @@ public sealed partial class MainWindow : Window
     {
         var ctrl = IsDown(VirtualKey.Control);
         var shift = IsDown(VirtualKey.Shift);
-        if (InSwipe)
+        if (InTournament)
+            e.Handled = HandleTournamentKey(e.Key, ctrl);
+        else if (InSwipe)
             e.Handled = HandleSwipeKey(e.Key, ctrl, shift);
         else if (InCompare)
             e.Handled = HandleCompareKey(e.Key, ctrl);
@@ -520,6 +535,7 @@ public sealed partial class MainWindow : Window
             case VirtualKey.F11: ToggleFullScreen(); return true;
             case VirtualKey.S: StartSwipe(); return true;
             case VirtualKey.C: StartCompare(); return true;
+            case VirtualKey.B: _ = SetUpTournamentAsync(); return true;
             case VirtualKey.Delete: _ = DeletePhotosAsync(CurrentPhotos()); return true;
         }
 
@@ -584,6 +600,8 @@ public sealed partial class MainWindow : Window
             ("Shift + ← (в свайпе)", "Отклонить всю серию похожих кадров"),
             ("C", "Сравнить выделенные фото или всю серию текущего фото"),
             ("1–9 (в сравнении)", "Убрать фото из сравнения; F / R / X оценивают фото под мышью"),
+            ("Shift / Ctrl + клик в ленте", "Выбрать фото для сравнения, не меняя открытое; C — сравнить"),
+            ("B", "Турнир: выбрать лучшие N фото попарно (← → выбор, Backspace назад)"),
             ("F11", "Полноэкранный режим"),
             ("`", "Автопереход после оценки вкл/выкл"),
             ("Ctrl+O", "Открыть папку"),

@@ -60,6 +60,44 @@ public sealed class AppSettings(LibraryDatabase database)
         set => database.SetSetting("remote_port", value?.ToString(CultureInfo.InvariantCulture) ?? "");
     }
 
+    /// <summary>Folders opened lately, newest first, for the arrow next to "Открыть папку".</summary>
+    public IReadOnlyList<string> RecentFolders =>
+        (database.GetSetting("recent_folders") ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+    public const int MaxRecentFolders = 8;
+
+    public void AddRecentFolder(string folder)
+    {
+        var folders = RecentFolders
+            .Where(f => !string.Equals(f.TrimEnd('\\', '/'), folder.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+            .Prepend(folder)
+            .Take(MaxRecentFolders);
+        database.SetSetting("recent_folders", string.Join('\n', folders));
+    }
+
+    public void ClearRecentFolders() => database.SetSetting("recent_folders", "");
+
+    /// <summary>The photo that was selected when Lumy closed, so reopening the folder picks up where it left off.</summary>
+    public string? LastPhoto
+    {
+        get => database.GetSetting("last_photo") is { Length: > 0 } path ? path : null;
+        set => database.SetSetting("last_photo", value ?? "");
+    }
+
+    /// <summary>Gallery sort order, by its <see cref="PhotoSort"/> name.</summary>
+    public string? Sort
+    {
+        get => database.GetSetting("sort") is { Length: > 0 } sort ? sort : null;
+        set => database.SetSetting("sort", value ?? "");
+    }
+
+    /// <summary>Window bounds when not maximized, plus whether it was maximized: "x,y,width,height,max".</summary>
+    public string? WindowPlacement
+    {
+        get => database.GetSetting("window_placement") is { Length: > 0 } placement ? placement : null;
+        set => database.SetSetting("window_placement", value ?? "");
+    }
+
     private bool GetBool(string key, bool fallback) =>
         bool.TryParse(database.GetSetting(key), out var value) ? value : fallback;
 }
