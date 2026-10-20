@@ -1,8 +1,5 @@
-using System.Runtime.InteropServices;
 using Lumy.Core;
 using Windows.Graphics.Imaging;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace Lumy.App;
 
@@ -11,8 +8,9 @@ public sealed partial class MainWindow
     private CancellationTokenSource? _seriesWork;
 
     /// <summary>
-    /// Groups the open folder into series. Capture times give a first grouping at once; thumbnail hashes,
-    /// computed in the background and saved for next time, then split bursts that changed scene.
+    /// Groups the open folder into series. Capture times give a first grouping at once. Then, in the background,
+    /// every photo gets its cached thumbnail (so scrolling later is instant) and a hash of it, saved for next time,
+    /// which splits bursts that changed scene.
     /// </summary>
     private async Task DetectSeriesAsync(IReadOnlyList<PhotoItem> items)
     {
@@ -20,23 +18,26 @@ public sealed partial class MainWindow
         var cancellation = _seriesWork = new CancellationTokenSource();
         AssignSeries(items);
 
-        var missing = items.Where(i => i.Hash is null).ToList();
-        if (missing.Count == 0)
-            return;
-
         try
         {
-            var hashes = await Task.Run(() => HashAllAsync(missing, cancellation.Token), cancellation.Token);
-            if (cancellation.IsCancellationRequested)
+            var work = items.Select(i => (i.Record, NeedsHash: i.Hash is null)).ToList();
+            var hashes = await Task.Run(() => WarmUpAsync(work, cancellation.Token), cancellation.Token);
+            if (cancellation.IsCancellationRequested || hashes.Count == 0)
                 return;
 
-            foreach (var (item, hash) in hashes)
-                item.Hash = hash;
-            await Task.Run(() => _database.SetHashes(hashes.Select(h => (h.Item.Id, h.Hash))));
+            var byId = items.ToDictionary(i => i.Id);
+            foreach (var (id, hash) in hashes)
+                byId[id].Hash = hash;
+            await Task.Run(() => _database.SetHashes(hashes));
             AssignSeries(items);
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (Exception e)
+        {
+            // Series are a convenience; failing to build them must not take the app down.
+            CrashLog.Write(e);
         }
     }
 
@@ -53,41 +54,28 @@ public sealed partial class MainWindow
         }
     }
 
-    private static async Task<List<(PhotoItem Item, ulong Hash)>> HashAllAsync(IReadOnlyList<PhotoItem> items, CancellationToken cancellationToken)
+    private async Task<List<(long Id, ulong Hash)>> WarmUpAsync(List<(PhotoRecord Record, bool NeedsHash)> work, CancellationToken cancellationToken)
     {
-        var results = new List<(PhotoItem, ulong)>();
-        using var gate = new SemaphoreSlim(4);
-        var tasks = items.Select(async item =>
+        var results = new List<(long, ulong)>();
+        await Parallel.ForEachAsync(work, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancellationToken }, async (entry, token) =>
         {
-            await gate.WaitAsync(cancellationToken);
-            try
+            var thumbnail = await _thumbnails.GetAsync(entry.Record, background: true, token);
+            if (entry.NeedsHash && thumbnail is not null && await HashAsync(thumbnail) is { } hash)
             {
-                if (await HashAsync(item.Path) is { } hash)
-                {
-                    lock (results)
-                        results.Add((item, hash));
-                }
-            }
-            finally
-            {
-                gate.Release();
+                lock (results)
+                    results.Add((entry.Record.Id, hash));
             }
         });
-        await Task.WhenAll(tasks);
         return results;
     }
 
-    /// <summary>Shrinks the Windows thumbnail to 9×8 pixels and hashes it.</summary>
-    private static async Task<ulong?> HashAsync(string path)
+    /// <summary>Shrinks the cached thumbnail to 9×8 pixels and hashes it.</summary>
+    private static async Task<ulong?> HashAsync(string thumbnailPath)
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 96, ThumbnailOptions.ResizeThumbnail);
-            if (thumbnail is null)
-                return null;
-
-            var decoder = await BitmapDecoder.CreateAsync(thumbnail);
+            using var stream = File.OpenRead(thumbnailPath).AsRandomAccessStream();
+            var decoder = await BitmapDecoder.CreateAsync(stream);
             var transform = new BitmapTransform
             {
                 ScaledWidth = PerceptualHash.Width,
@@ -96,10 +84,10 @@ public sealed partial class MainWindow
             };
             var pixels = await decoder.GetPixelDataAsync(
                 BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, transform,
-                ExifOrientationMode.RespectExifOrientation, ColorManagementMode.DoNotColorManage);
+                ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
             return PerceptualHash.FromBgra(pixels.DetachPixelData());
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException or ArgumentException)
+        catch (Exception)
         {
             return null;
         }

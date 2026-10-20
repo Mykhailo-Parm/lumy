@@ -18,12 +18,13 @@ namespace Lumy.App;
 
 public sealed partial class MainWindow : Window
 {
-    private const uint ThumbnailRequestSize = 512;
-
     private readonly LibraryDatabase _database;
     private readonly AppSettings _settings;
     private readonly RatingService _ratings;
     private readonly LoupeImageCache _loupeCache;
+    private readonly ThumbnailService _thumbnails = new(ThumbnailService.DefaultFolder);
+    private readonly ThumbnailTracker _galleryThumbnails;
+    private readonly ThumbnailTracker _filmstripThumbnails;
     private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromMilliseconds(1600) };
     private readonly DispatcherTimer _flashTimer = new() { Interval = TimeSpan.FromMilliseconds(380) };
 
@@ -40,9 +41,11 @@ public sealed partial class MainWindow : Window
     private bool _zoomedIn;
     private Point _pointerInLoupe;
 
-    public MainWindow(string? folder)
+    public MainWindow(string? folder, bool selfTest = false)
     {
         InitializeComponent();
+        _galleryThumbnails = new ThumbnailTracker(_thumbnails);
+        _filmstripThumbnails = new ThumbnailTracker(_thumbnails);
 
         _database = new LibraryDatabase(LibraryDatabase.DefaultPath);
         _settings = new AppSettings(_database);
@@ -64,12 +67,19 @@ public sealed partial class MainWindow : Window
         };
 
         Gallery.ItemsSource = _visible;
+        SetUpViewer();
         SizeSlider.Value = _settings.ThumbnailSize;
         _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); Toast.Opacity = 0; };
         _flashTimer.Tick += (_, _) => { _flashTimer.Stop(); FlashBadge.Opacity = 0; };
         Gallery.SelectionChanged += (_, _) => PushRemoteState();
         if (_settings.RemoteEnabled)
             _ = StartRemoteAsync(showErrors: false);
+
+        if (selfTest && folder is not null)
+        {
+            _ = RunSelfTestAsync(folder);
+            return;
+        }
 
         var start = folder ?? _settings.LastFolder;
         if (!string.IsNullOrEmpty(start) && Directory.Exists(start))
@@ -123,6 +133,9 @@ public sealed partial class MainWindow : Window
             _folder = folder;
             _settings.LastFolder = folder;
             _loupeCache.Clear();
+            _details.Clear();
+            _galleryThumbnails.ReleaseAll();
+            _filmstripThumbnails.ReleaseAll();
             _all = records.Select(r => new PhotoItem(r)).ToList();
             _remotePaths = _all.ToDictionary(p => p.Id, p => p.Path);
             ApplyFilter();
@@ -219,13 +232,7 @@ public sealed partial class MainWindow : Window
 
     private void Gallery_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        if (args.Item is not PhotoItem item)
-            return;
-
-        if (args.InRecycleQueue)
-            item.ReleaseThumbnail();
-        else
-            _ = item.LoadThumbnailAsync(ThumbnailRequestSize);
+        _galleryThumbnails.OnContainerContentChanging(args);
     }
 
     private void Gallery_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -303,6 +310,8 @@ public sealed partial class MainWindow : Window
 
         ResetZoom();
         UpdateLoupeInfo();
+        SyncFilmstrip(index);
+        LoadDetails(item);
 
         var pending = _loupeCache.GetAsync(item);
         _loupeCache.Prefetch(_visible, index);
@@ -310,10 +319,9 @@ public sealed partial class MainWindow : Window
         // Usually the neighbour was prefetched and is ready. If not, show the thumbnail at once and swap in the sharp image.
         if (!pending.IsCompleted)
         {
-            if (item.Thumbnail is null)
-                await item.LoadThumbnailAsync(ThumbnailRequestSize);
+            var placeholder = item.Thumbnail ?? await PhotoItem.LoadCachedThumbnailAsync(_thumbnails, item.Record);
             if (request == _loupeRequest && !pending.IsCompleted)
-                LoupeImage.Source = item.Thumbnail;
+                LoupeImage.Source = placeholder;
         }
 
         var bitmap = await pending;
@@ -330,12 +338,11 @@ public sealed partial class MainWindow : Window
 
         var item = _visible[_loupeIndex];
         LoupeName.Text = item.FileName;
-        LoupeDetails.Text = item.Record.CapturedAt is { } taken ? $"{item.FormatLabel}  ·  {taken:dd.MM.yyyy HH:mm:ss}" : item.FormatLabel;
+        LoupeDetails.Text = DetailsLine(item);
         LoupePosition.Text = item.SeriesSize > 1
             ? $"серия {item.SeriesPosition}/{item.SeriesSize}  ·  {_loupeIndex + 1} / {_visible.Count}"
             : $"{_loupeIndex + 1} / {_visible.Count}";
-        LoupeTierIcon.Glyph = item.Tier == Tier.None ? "\uEB51" : item.TierGlyph; // empty heart when unrated
-        LoupeTierIcon.Foreground = item.TierBrush ?? (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+        UpdateRatingButtons(item.Tier);
     }
 
     private void StepLoupe(int delta, bool unratedOnly = false)
@@ -352,14 +359,11 @@ public sealed partial class MainWindow : Window
 
     private void LoupeScroll_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // At zoom 1 the image exactly fits the window; zooming in scales from there.
-        LoupeImage.Width = e.NewSize.Width;
-        LoupeImage.Height = e.NewSize.Height;
+        // At zoom 1 the canvas exactly fills the space between the bars and the photo sits centred in it.
+        LoupeCanvas.Width = e.NewSize.Width;
+        LoupeCanvas.Height = e.NewSize.Height;
         ResetZoom();
     }
-
-    private void LoupeScroll_PointerMoved(object sender, PointerRoutedEventArgs e) =>
-        _pointerInLoupe = e.GetCurrentPoint(LoupeScroll).Position;
 
     private void LoupeScroll_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
@@ -425,14 +429,16 @@ public sealed partial class MainWindow : Window
         _ratings.Rate(targets, tier);
         UpdateCounter();
 
+        // Clearing a rating stays on the photo: it is a correction, not a decision.
+        var advance = _settings.AutoAdvance && tier != Tier.None;
         if (InLoupe)
         {
             Flash(tier);
             UpdateLoupeInfo();
-            if (_settings.AutoAdvance && _loupeIndex < _visible.Count - 1)
+            if (advance && _loupeIndex < _visible.Count - 1)
                 StepLoupe(+1);
         }
-        else if (_settings.AutoAdvance && targets.Count == 1 && Gallery.SelectedIndex < _visible.Count - 1)
+        else if (advance && targets.Count == 1 && Gallery.SelectedIndex < _visible.Count - 1)
         {
             Gallery.SelectedIndex++;
             Gallery.ScrollIntoView(Gallery.SelectedItem);
@@ -487,6 +493,7 @@ public sealed partial class MainWindow : Window
         switch (key)
         {
             case VirtualKey.O: _ = PickFolderAsync(); return true;
+            case VirtualKey.C: _ = CopyPhotosAsync(CurrentPhotos(), pathsOnly: shift); return true;
             case VirtualKey.Z: UndoOrRedo(redo: shift); return true;
             case VirtualKey.Y: UndoOrRedo(redo: true); return true;
             case VirtualKey.Number0: SetFilter(TierFilter.All); return true;
@@ -513,6 +520,7 @@ public sealed partial class MainWindow : Window
             case VirtualKey.F11: ToggleFullScreen(); return true;
             case VirtualKey.S: StartSwipe(); return true;
             case VirtualKey.C: StartCompare(); return true;
+            case VirtualKey.Delete: _ = DeletePhotosAsync(CurrentPhotos()); return true;
         }
 
         if (InLoupe)
@@ -524,6 +532,7 @@ public sealed partial class MainWindow : Window
                 case VirtualKey.Home: ShowInLoupe(0); return true;
                 case VirtualKey.End: ShowInLoupe(_visible.Count - 1); return true;
                 case VirtualKey.Z: _ = ToggleZoomAsync(); return true;
+                case VirtualKey.T: ToggleFilmstrip(); return true;
                 case VirtualKey.Escape or VirtualKey.Enter: CloseLoupe(); return true;
                 default: return false;
             }
@@ -565,6 +574,12 @@ public sealed partial class MainWindow : Window
             ("Ctrl + 0 / 1 / 2 / 3 / 4", "Все / Лайки / Суперлайки / Без оценки / Отклонённые"),
             ("Enter / Esc", "Открыть на весь экран / назад в галерею"),
             ("Z  или двойной клик", "Масштаб 100% и обратно"),
+            ("Колесо мыши", "Следующее / предыдущее фото; над лентой листает ленту"),
+            ("Ctrl + колесо, перетаскивание", "Зум и сдвиг увеличенного фото"),
+            ("T", "Показать или скрыть ленту в просмотре"),
+            ("Правый клик", "Копировать, показать в проводнике, открыть в другой программе"),
+            ("Ctrl+C / Ctrl+Shift+C", "Копировать фото / путь к файлу"),
+            ("Delete", "Удалить в корзину (вместе с RAW и .xmp)"),
             ("S", "Режим свайпа по фото без оценки: → лайк, ↑ суперлайк, ← отказ, ↓ потом, Backspace назад"),
             ("Shift + ← (в свайпе)", "Отклонить всю серию похожих кадров"),
             ("C", "Сравнить выделенные фото или всю серию текущего фото"),

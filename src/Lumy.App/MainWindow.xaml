@@ -83,7 +83,8 @@
                 IsItemClickEnabled="False"
                 ContainerContentChanging="Gallery_ContainerContentChanging"
                 DoubleTapped="Gallery_DoubleTapped"
-                PointerWheelChanged="Gallery_PointerWheelChanged">
+                PointerWheelChanged="Gallery_PointerWheelChanged"
+                ContextRequested="Gallery_ContextRequested">
                 <GridView.ItemsPanel>
                     <ItemsPanelTemplate>
                         <ItemsWrapGrid Orientation="Horizontal" ItemWidth="200" ItemHeight="200" />
@@ -123,10 +124,54 @@
             <ProgressRing x:Name="LoadingRing" IsActive="False" Width="48" Height="48" />
         </Grid>
 
-        <!-- Full-screen viewer, drawn over everything below the title bar. -->
+        <!-- Full-screen viewer, drawn over everything below the title bar: info bar, photo, filmstrip. -->
         <Grid x:Name="Loupe" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Background="{StaticResource LoupeBackgroundBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Top bar: rating buttons, name, shooting details, position -->
+            <Grid Grid.Row="0" Padding="12,6,16,6" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                    <Button x:Name="LoupeRejectButton" Click="LoupeReject_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Отказ (X). Ещё раз, чтобы снять">
+                        <FontIcon x:Name="LoupeRejectIcon" Glyph="&#xE711;" FontSize="18" />
+                    </Button>
+                    <Button x:Name="LoupeLikeButton" Click="LoupeLike_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Лайк (F или 1). Ещё раз, чтобы снять">
+                        <FontIcon x:Name="LoupeLikeIcon" Glyph="&#xEB51;" FontSize="18" />
+                    </Button>
+                    <Button x:Name="LoupeSuperButton" Click="LoupeSuper_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Суперлайк (R или 2). Ещё раз, чтобы снять">
+                        <FontIcon x:Name="LoupeSuperIcon" Glyph="&#xE734;" FontSize="18" />
+                    </Button>
+                </StackPanel>
+                <TextBlock x:Name="LoupeName" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock x:Name="LoupeDetails" Grid.Column="2" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="LoupePosition" Grid.Column="3" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4">
+                    <Button Click="FilmstripToggle_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Показать или скрыть ленту (T)">
+                        <FontIcon x:Name="FilmstripToggleIcon" Glyph="&#xE70D;" FontSize="14" />
+                    </Button>
+                    <Button Click="LoupeMore_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Ещё: копировать, показать в проводнике, открыть в…">
+                        <FontIcon Glyph="&#xE712;" FontSize="16" />
+                    </Button>
+                    <Button Click="LoupeClose_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="В галерею (Esc)">
+                        <FontIcon Glyph="&#xE8BB;" FontSize="14" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- The photo: centred, fitted to the space between the bars; Ctrl + wheel or Z zooms, drag pans. -->
             <ScrollViewer
                 x:Name="LoupeScroll"
+                Grid.Row="1"
                 ZoomMode="Enabled"
                 MinZoomFactor="1"
                 MaxZoomFactor="16"
@@ -135,27 +180,15 @@
                 HorizontalScrollBarVisibility="Hidden"
                 VerticalScrollBarVisibility="Hidden"
                 SizeChanged="LoupeScroll_SizeChanged"
-                PointerMoved="LoupeScroll_PointerMoved"
-                DoubleTapped="LoupeScroll_DoubleTapped">
-                <Image x:Name="LoupeImage" Stretch="Uniform" />
+                DoubleTapped="LoupeScroll_DoubleTapped"
+                ContextRequested="LoupeScroll_ContextRequested">
+                <Grid x:Name="LoupeCanvas" Background="Transparent">
+                    <Image x:Name="LoupeImage" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Grid>
             </ScrollViewer>
 
-            <!-- Top strip: name, position, tier -->
-            <Grid VerticalAlignment="Top" Padding="20,12" Background="#66000000" ColumnSpacing="16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <FontIcon x:Name="LoupeTierIcon" Grid.Column="0" FontSize="18" />
-                <TextBlock x:Name="LoupeName" Grid.Column="1" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock x:Name="LoupeDetails" Grid.Column="2" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="LoupePosition" Grid.Column="3" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </Grid>
-
             <!-- Flash shown for a moment after rating, so a key press visibly lands. -->
-            <Border x:Name="FlashBadge" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="28" CornerRadius="60"
+            <Border x:Name="FlashBadge" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="28" CornerRadius="60"
                     Background="#88000000" Opacity="0" IsHitTestVisible="False">
                 <Border.OpacityTransition>
                     <ScalarTransition Duration="0:0:0.18" />
@@ -163,9 +196,48 @@
                 <FontIcon x:Name="FlashIcon" FontSize="64" />
             </Border>
 
-            <TextBlock VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14"
-                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                       Text="← → листать  ·  F лайк  ·  R суперлайк  ·  X отказ  ·  0 снять  ·  Z 100%  ·  C сравнить серию  ·  Esc в галерею" />
+            <!-- Filmstrip: the wheel over it scrolls the strip only; a click opens that photo. -->
+            <Grid x:Name="FilmstripPanel" Grid.Row="2" Background="#FF111113">
+                <ListView
+                    x:Name="Filmstrip"
+                    Height="96"
+                    Padding="8,6"
+                    SelectionMode="Single"
+                    IsItemClickEnabled="True"
+                    ItemClick="Filmstrip_ItemClick"
+                    ContainerContentChanging="Filmstrip_ContainerContentChanging"
+                    ContextRequested="Filmstrip_ContextRequested"
+                    ScrollViewer.HorizontalScrollMode="Enabled"
+                    ScrollViewer.HorizontalScrollBarVisibility="Hidden"
+                    ScrollViewer.VerticalScrollMode="Disabled"
+                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                    ScrollViewer.IsHorizontalRailEnabled="True">
+                    <ListView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ItemsStackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ListView.ItemsPanel>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="2,0" />
+                            <Setter Property="MinWidth" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:PhotoItem">
+                            <Grid Width="{StaticResource FilmstripItemWidth}" Height="80" CornerRadius="4" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
+                                <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="UniformToFill" Opacity="{x:Bind ImageOpacity, Mode=OneWay}" />
+                                <Border Visibility="{x:Bind TierBadgeVisibility, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Margin="3" Padding="3" CornerRadius="8" Background="#99000000">
+                                    <FontIcon Glyph="{x:Bind TierGlyph, Mode=OneWay}" FontSize="10" Foreground="{x:Bind TierBrush, Mode=OneWay}" />
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
         </Grid>
 
         <!-- Swipe mode: one card at a time, a decision per card. -->

@@ -32,6 +32,13 @@ public sealed class AppSettings(LibraryDatabase database)
         set => database.SetSetting("thumbnail_size", value.ToString(CultureInfo.InvariantCulture));
     }
 
+    /// <summary>Whether the full-screen viewer shows the strip of neighbouring photos at the bottom.</summary>
+    public bool FilmstripVisible
+    {
+        get => GetBool("filmstrip_visible", true);
+        set => database.SetSetting("filmstrip_visible", value.ToString());
+    }
+
     /// <summary>Whether the phone remote starts with Lumy, so a phone that scanned the code once reconnects by itself.</summary>
     public bool RemoteEnabled
     {

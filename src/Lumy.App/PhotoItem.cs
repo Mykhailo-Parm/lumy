@@ -1,12 +1,9 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Lumy.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage;
-using Windows.Storage.FileProperties;
 
 namespace Lumy.App;
 
@@ -16,6 +13,7 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
     private Tier _tier = record.Tier;
     private ImageSource? _thumbnail;
     private int _thumbnailRequest;
+    private int _thumbnailUsers;
     private int _seriesId;
     private int _seriesSize = 1;
     private int _seriesPosition = 1;
@@ -120,38 +118,49 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
     };
 
     /// <summary>
-    /// Loads the thumbnail from the Windows thumbnail cache, which already holds the embedded preview
-    /// for JPEG and RAW files, so the gallery never decodes full images.
+    /// A list started showing this photo: loads its thumbnail if no other list already has. The gallery and the
+    /// viewer's filmstrip share one bitmap, so each counts its uses and the last one out frees it.
     /// </summary>
-    public async Task LoadThumbnailAsync(uint size)
+    public async void AcquireThumbnail(ThumbnailService thumbnails)
     {
-        if (_thumbnail is not null)
+        if (++_thumbnailUsers > 1 || _thumbnail is not null)
             return;
 
         var request = ++_thumbnailRequest;
-        try
-        {
-            var file = await StorageFile.GetFileFromPathAsync(Path);
-            using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, size, ThumbnailOptions.ResizeThumbnail);
-            if (thumbnail is null || request != _thumbnailRequest)
-                return;
-
-            var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(thumbnail);
-            if (request == _thumbnailRequest)
-                Thumbnail = bitmap;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException)
-        {
-            // The file was moved or cannot be read; the tile keeps its placeholder.
-        }
+        var bitmap = await LoadCachedThumbnailAsync(thumbnails, Record);
+        if (request == _thumbnailRequest && _thumbnailUsers > 0 && bitmap is not null)
+            Thumbnail = bitmap;
     }
 
-    /// <summary>Drops the thumbnail when its tile scrolls away, so a 3000-photo folder does not hold 3000 bitmaps.</summary>
+    /// <summary>A list stopped showing this photo; frees the bitmap once nothing shows it, so a 3000-photo folder never holds 3000 bitmaps.</summary>
     public void ReleaseThumbnail()
     {
+        if (_thumbnailUsers == 0 || --_thumbnailUsers > 0)
+            return;
+
         _thumbnailRequest++;
         Thumbnail = null;
+    }
+
+    /// <summary>The thumbnail as a bitmap of its own, for a placeholder while the full image decodes.</summary>
+    public static async Task<BitmapImage?> LoadCachedThumbnailAsync(ThumbnailService thumbnails, PhotoRecord record)
+    {
+        try
+        {
+            var path = await thumbnails.GetAsync(record, background: false);
+            if (path is null)
+                return null;
+
+            var bitmap = new BitmapImage();
+            using var stream = File.OpenRead(path).AsRandomAccessStream();
+            await bitmap.SetSourceAsync(stream);
+            return bitmap;
+        }
+        catch (Exception)
+        {
+            // A broken cache file or a photo that vanished keeps the placeholder.
+            return null;
+        }
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>

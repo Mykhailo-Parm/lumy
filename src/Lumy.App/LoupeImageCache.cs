@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Lumy.Core;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage;
@@ -59,13 +58,13 @@ public sealed class LoupeImageCache(int decodeWidth)
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
             var bitmap = new BitmapImage();
 
             // RAW files are shown through their embedded preview, which Windows hands out quickly;
             // decoding the sensor data is not needed for picking shots.
             if (PhotoFormats.IsRaw(path))
             {
+                var file = await StorageFile.GetFileFromPathAsync(path);
                 using var preview = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, (uint)(width == 0 ? 8192 : width), ThumbnailOptions.ResizeThumbnail);
                 if (preview is null)
                     return null;
@@ -79,12 +78,13 @@ public sealed class LoupeImageCache(int decodeWidth)
                 bitmap.DecodePixelWidth = width;
             }
 
-            using var stream = await file.OpenReadAsync();
+            using var stream = File.OpenRead(path).AsRandomAccessStream();
             await bitmap.SetSourceAsync(stream);
             return bitmap;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException)
+        catch (Exception)
         {
+            // Unreadable or unsupported files show their thumbnail instead; never a reason to crash.
             return null;
         }
     }
