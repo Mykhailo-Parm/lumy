@@ -185,6 +185,8 @@ public sealed partial class MainWindow
         if (_swipe is not { } session)
             return;
 
+        PushRemoteState();
+
         SwipeProgressBar.Maximum = Math.Max(1, session.Total);
         SwipeProgressBar.Value = session.IsFinished ? session.Total : session.Position - 1;
         SwipeProgressText.Text = session.IsFinished

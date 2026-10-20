@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Lumy.Core\Lumy.Core.csproj" />
+    <ProjectReference Include="..\Lumy.Remote\Lumy.Remote.csproj" />
   </ItemGroup>
 
 </Project>

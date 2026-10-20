@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b0b0c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Lumy · пульт</title>
+<style>
+  :root {
+    --bg: #0b0b0c; --panel: #17171a; --line: #2a2a2f; --text: #f2f2f4; --muted: #9a9aa3;
+    --like: #ff5a7a; --super: #ffc23d; --reject: #9aa0a6; --ok: #3ccf7a; --warn: #e5a50a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.35 -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { display: flex; flex-direction: column; padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom); user-select: none; }
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 2px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
+  .dot.on { background: var(--ok); }
+  .brand { font-weight: 600; }
+  #mode { color: var(--muted); margin-left: auto; }
+  #stage { position: relative; flex: 1; min-height: 0; border-radius: 16px; background: var(--panel);
+    overflow: hidden; touch-action: none; display: flex; align-items: center; justify-content: center; }
+  #photo { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .16s ease-out, opacity .16s; pointer-events: none; }
+  #photo.dragging { transition: none; }
+  #hint { position: absolute; font-size: 64px; opacity: 0; pointer-events: none; text-shadow: 0 2px 12px #000; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 24px; color: var(--muted); }
+  .info { display: flex; gap: 8px; align-items: baseline; padding: 10px 2px 4px; min-height: 40px; }
+  #name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tier { font-size: 18px; }
+  #pos { color: var(--muted); margin-left: auto; white-space: nowrap; }
+  #detail { color: var(--muted); padding: 0 2px 8px; min-height: 22px; font-size: 13px; }
+  .row { display: grid; gap: 10px; margin-bottom: 10px; }
+  .rate { grid-template-columns: repeat(3, 1fr); }
+  .tools { grid-template-columns: repeat(4, 1fr); }
+  button { appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    border-radius: 14px; padding: 12px 6px; font: inherit; font-size: 14px; touch-action: manipulation; }
+  button:active { transform: scale(.96); background: #222227; }
+  .big { font-size: 26px; padding: 14px 6px; }
+  .like { color: var(--like); } .super { color: var(--super); } .reject { color: var(--reject); }
+  button[hidden] { display: none; }
+  .tip { color: var(--muted); font-size: 12px; text-align: center; padding-bottom: 6px; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="dot"></span><span class="brand">Lumy</span><span id="mode">подключаюсь…</span>
+  </header>
+
+  <div id="stage">
+    <img id="photo" alt="">
+    <div id="hint"></div>
+    <div id="empty">Откройте папку с фото в Lumy на компьютере</div>
+  </div>
+
+  <div class="info"><span id="tier"></span><span id="name"></span><span id="pos"></span></div>
+  <div id="detail"></div>
+
+  <div class="row rate">
+    <button class="big reject" data-cmd="reject" aria-label="Отказ">✕</button>
+    <button class="big super" data-cmd="super" aria-label="Суперлайк">★</button>
+    <button class="big like" data-cmd="like" aria-label="Лайк">♥</button>
+  </div>
+  <div class="row tools">
+    <button data-cmd="undo">↶ Назад</button>
+    <button id="openBtn" data-cmd="open">Открыть</button>
+    <button id="swipeBtn" data-cmd="swipe">Свайп</button>
+    <button id="zoomBtn" data-cmd="zoom">100%</button>
+  </div>
+  <div class="tip" id="tip">Свайп по фото: ← → листать</div>
+
+<script>
+(() => {
+  const token = new URLSearchParams(location.search).get('t') || '';
+  const $ = id => document.getElementById(id);
+  const glyph = { like: '♥', superLike: '★', rejected: '✕', none: '' };
+  const tierClass = { like: 'like', superLike: 'super', rejected: 'reject', none: '' };
+  const modeName = { empty: 'нет фото', gallery: 'галерея', loupe: 'просмотр', swipe: 'свайп', 'swipe-done': 'свайп завершён', compare: 'сравнение' };
+  let socket, state = { mode: 'empty' }, retry = 500, shownId = null;
+
+  function connect() {
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    socket = new WebSocket(`${scheme}://${location.host}/ws?t=${encodeURIComponent(token)}`);
+    socket.onopen = () => { retry = 500; $('dot').classList.add('on'); };
+    socket.onmessage = e => { try { render(JSON.parse(e.data)); } catch { } };
+    socket.onclose = () => {
+      $('dot').classList.remove('on'); $('mode').textContent = 'нет связи, переподключаюсь…';
+      setTimeout(connect, retry); retry = Math.min(retry * 2, 5000);
+    };
+  }
+
+  function send(cmd) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ cmd }));
+      if (navigator.vibrate) navigator.vibrate(12);
+    }
+  }
+
+  function render(s) {
+    state = s;
+    const swipe = s.mode === 'swipe';
+    $('mode').textContent = modeName[s.mode] || s.mode;
+    $('empty').style.display = s.photoId == null ? 'flex' : 'none';
+    $('empty').textContent = s.mode === 'swipe-done'
+      ? `Готово: ♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}`
+      : s.mode === 'compare' ? 'Сейчас на компьютере сравнение, управляйте им мышью' : 'Откройте папку с фото в Lumy на компьютере';
+    $('name').textContent = s.fileName || '';
+    $('pos').textContent = s.total ? `${s.position} / ${s.total}` : '';
+    $('tier').textContent = glyph[s.tier] || '';
+    $('tier').className = tierClass[s.tier] || '';
+    $('detail').textContent = swipe ? `♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}${s.detail ? ' · ' + s.detail : ''}` : (s.detail || '');
+    $('openBtn').textContent = s.mode === 'gallery' ? 'Открыть' : 'Выйти';
+    $('openBtn').dataset.cmd = s.mode === 'gallery' ? 'open' : 'back';
+    $('swipeBtn').hidden = swipe;
+    $('zoomBtn').hidden = s.mode !== 'loupe';
+    $('tip').textContent = swipe ? 'Свайп по фото: → лайк · ↑ суперлайк · ← отказ · ↓ потом' : 'Свайп по фото: ← → листать';
+
+    if (s.photoId !== shownId) {
+      shownId = s.photoId;
+      const img = $('photo');
+      img.classList.add('dragging');
+      img.style.transform = ''; img.style.opacity = '1';
+      if (s.photoId != null) img.src = `/preview/${s.photoId}?t=${encodeURIComponent(token)}`;
+      else img.removeAttribute('src');
+      requestAnimationFrame(() => img.classList.remove('dragging'));
+    }
+  }
+
+  document.querySelectorAll('button[data-cmd]').forEach(b => b.addEventListener('click', () => send(b.dataset.cmd)));
+
+  // Gestures on the photo: in swipe mode they decide, elsewhere they step through photos.
+  const stage = $('stage'), img = $('photo'), hint = $('hint');
+  let start = null;
+  stage.addEventListener('pointerdown', e => { start = { x: e.clientX, y: e.clientY, t: Date.now() }; img.classList.add('dragging'); stage.setPointerCapture(e.pointerId); });
+  stage.addEventListener('pointermove', e => {
+    if (!start) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    img.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 20}deg)`;
+    const move = intent(dx, dy);
+    hint.textContent = move ? move.icon : '';
+    hint.style.opacity = move ? Math.min(1, move.strength) : 0;
+  });
+  const end = e => {
+    if (!start) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    start = null; img.classList.remove('dragging'); hint.style.opacity = 0;
+    const move = intent(dx, dy);
+    if (move && move.strength >= 1) {
+      img.style.transform = `translate(${Math.sign(dx) * (Math.abs(dx) > Math.abs(dy) ? 400 : 0)}px, ${Math.abs(dy) >= Math.abs(dx) ? Math.sign(dy) * 600 : 0}px)`;
+      img.style.opacity = state.mode === 'swipe' ? '0' : '1';
+      send(move.cmd);
+      if (state.mode !== 'swipe') setTimeout(() => { img.style.transform = ''; }, 120);
+    } else {
+      img.style.transform = '';
+    }
+  };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+
+  function intent(dx, dy) {
+    const w = stage.clientWidth * 0.25, h = stage.clientHeight * 0.18;
+    const x = dx / w, y = dy / h;
+    if (Math.abs(x) < 0.15 && Math.abs(y) < 0.15) return null;
+    const swipe = state.mode === 'swipe';
+    if (Math.abs(x) >= Math.abs(y)) {
+      if (swipe) return x > 0 ? { cmd: 'like', icon: '♥', strength: x } : { cmd: 'reject', icon: '✕', strength: -x };
+      return x > 0 ? { cmd: 'prev', icon: '‹', strength: x } : { cmd: 'next', icon: '›', strength: -x };
+    }
+    if (!swipe) return null;
+    return y < 0 ? { cmd: 'super', icon: '★', strength: -y } : { cmd: 'skip', icon: '↓', strength: y };
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

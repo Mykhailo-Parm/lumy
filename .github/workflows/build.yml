@@ -18,6 +18,9 @@ jobs:
       - name: Test core
         run: dotnet test tests/Lumy.Core.Tests -c Release
 
+      - name: Test phone remote
+        run: dotnet test tests/Lumy.Remote.Tests -c Release
+
       - name: Build app (x64)
         run: dotnet publish src/Lumy.App -c Release -p:Platform=x64 -r win-x64 --self-contained -o artifacts/Lumy-win-x64
 
