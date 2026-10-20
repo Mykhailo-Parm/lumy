@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lumy.App/Lumy.App.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/Lumy.Core/Lumy.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lumy.Core.Tests/Lumy.Core.Tests.csproj" />
+  </Folder>
+</Solution>
