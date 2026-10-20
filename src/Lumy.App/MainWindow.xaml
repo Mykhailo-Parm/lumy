@@ -50,6 +50,21 @@
                         <TextBlock Text="Турнир" />
                     </StackPanel>
                 </Button>
+                <DropDownButton ToolTipService.ToolTip="Альбомы: подборки для каруселей и сторис, без копирования файлов">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE8F1;" FontSize="16" />
+                        <TextBlock Text="Альбомы" />
+                    </StackPanel>
+                    <DropDownButton.Flyout>
+                        <MenuFlyout x:Name="AlbumsMenu" Placement="BottomEdgeAlignedLeft" Opening="AlbumsMenu_Opening" />
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+                <Button Click="Export_Click" ToolTipService.ToolTip="Экспорт JPEG для Instagram (Ctrl+E)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xEDE1;" FontSize="16" />
+                        <TextBlock Text="Экспорт" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
 
             <SelectorBar x:Name="FilterBar" Grid.Column="1" SelectionChanged="FilterBar_SelectionChanged">
@@ -87,9 +102,39 @@
 
         <!-- Gallery -->
         <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Shown while an album is open instead of a folder. -->
+            <Grid x:Name="AlbumBar" Grid.Row="0" Visibility="Collapsed" Margin="16,0,16,8" Padding="14,8" ColumnSpacing="12" CornerRadius="8"
+                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon Glyph="&#xE8F1;" FontSize="18" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock x:Name="AlbumTitle" Style="{StaticResource BodyStrongTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="AlbumHint" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Экспорт альбома" Style="{StaticResource AccentButtonStyle}" Click="AlbumExport_Click" />
+                    <Button Content="Переименовать" Click="AlbumRename_Click" />
+                    <Button Content="Удалить альбом" Click="AlbumDelete_Click" />
+                    <Button Click="AlbumClose_Click" ToolTipService.ToolTip="Вернуться к папке">
+                        <FontIcon Glyph="&#xE8BB;" FontSize="12" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+
             <GridView
                 x:Name="Gallery"
+                Grid.Row="1"
                 Padding="12,0,12,12"
+                DragItemsCompleted="Gallery_DragItemsCompleted"
                 SelectionMode="Extended"
                 IsItemClickEnabled="False"
                 ContainerContentChanging="Gallery_ContainerContentChanging"
@@ -111,6 +156,12 @@
                                     Padding="5" CornerRadius="12" Background="#99000000">
                                 <FontIcon Glyph="{x:Bind TierGlyph, Mode=OneWay}" FontSize="14" Foreground="{x:Bind TierBrush, Mode=OneWay}" />
                             </Border>
+                            <Border Visibility="{x:Bind EditVisibility, Mode=OneWay}"
+                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="6"
+                                    Padding="5" CornerRadius="12" Background="#99000000"
+                                    ToolTipService.ToolTip="{x:Bind EditSummary, Mode=OneWay}">
+                                <FontIcon Glyph="&#xE70F;" FontSize="12" />
+                            </Border>
                             <Border Visibility="{x:Bind SeriesBadgeVisibility, Mode=OneWay}"
                                     HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="6"
                                     Padding="6,2" CornerRadius="8" Background="#99000000"
@@ -125,14 +176,14 @@
                 </GridView.ItemTemplate>
             </GridView>
 
-            <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+            <StackPanel x:Name="EmptyState" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
                 <FontIcon Glyph="&#xE91B;" FontSize="48" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                 <TextBlock Text="Откройте папку с фотосессией" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
                 <TextBlock Text="Ctrl+O или перетащите папку в окно" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
                 <Button Content="Открыть папку" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Center" Click="OpenFolder_Click" />
             </StackPanel>
 
-            <ProgressRing x:Name="LoadingRing" IsActive="False" Width="48" Height="48" />
+            <ProgressRing x:Name="LoadingRing" Grid.Row="1" IsActive="False" Width="48" Height="48" />
         </Grid>
 
         <!-- Full-screen viewer, drawn over everything below the title bar: info bar, photo, filmstrip. -->
@@ -167,6 +218,9 @@
                 <TextBlock x:Name="LoupeDetails" Grid.Column="2" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="LoupePosition" Grid.Column="3" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4">
+                    <Button Click="LoupeEdit_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Кроп и цвет для Instagram (E)">
+                        <FontIcon Glyph="&#xE70F;" FontSize="16" />
+                    </Button>
                     <Button Click="FilmstripToggle_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Показать или скрыть ленту (T)">
                         <FontIcon x:Name="FilmstripToggleIcon" Glyph="&#xE70D;" FontSize="14" />
                     </Button>
@@ -341,8 +395,35 @@
                 <TextBlock x:Name="CompareInfo" Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </Grid>
             <Grid x:Name="CompareGrid" Grid.Row="1" Margin="8,0" SizeChanged="CompareGrid_SizeChanged" />
-            <TextBlock Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,14" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                       Text="Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ  ·  1–9 убрать из сравнения  ·  Ctrl+колесо зум  ·  L синхронизация  ·  Esc назад" />
+
+            <!-- Overlay: two frames on top of each other, a wipe or a fade between them, to catch small differences. -->
+            <Grid x:Name="OverlayStage" Grid.Row="1" Margin="8,0" Visibility="Collapsed" Background="Transparent"
+                  PointerMoved="OverlayStage_PointerMoved" PointerPressed="OverlayStage_PointerPressed" PointerWheelChanged="OverlayStage_PointerWheelChanged"
+                  PointerReleased="OverlayStage_PointerReleased" PointerCaptureLost="OverlayStage_PointerCaptureLost"
+                  SizeChanged="OverlayStage_SizeChanged">
+                <Image x:Name="OverlayBottom" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Image x:Name="OverlayTop" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" SizeChanged="OverlayStage_SizeChanged" />
+                <Canvas x:Name="OverlayMarks" IsHitTestVisible="False">
+                    <Rectangle x:Name="OverlaySplit" Width="2" Fill="White" Opacity="0.9" />
+                </Canvas>
+                <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="10,4" CornerRadius="8" Background="#99000000" IsHitTestVisible="False">
+                    <TextBlock x:Name="OverlayLeftName" FontSize="12" />
+                </Border>
+                <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10" Padding="10,4" CornerRadius="8" Background="#99000000" IsHitTestVisible="False">
+                    <TextBlock x:Name="OverlayRightName" FontSize="12" />
+                </Border>
+            </Grid>
+
+            <StackPanel Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,14" Spacing="8">
+                <StackPanel x:Name="OverlayBar" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center" Visibility="Collapsed">
+                    <ToggleButton x:Name="OverlayWipeButton" Content="Шторка" Click="OverlayWipe_Click" />
+                    <ToggleButton x:Name="OverlayFadeButton" Content="Прозрачность" Click="OverlayFade_Click" />
+                    <Slider x:Name="OverlaySlider" Width="260" Minimum="0" Maximum="1" StepFrequency="0.01" VerticalAlignment="Center" ValueChanged="OverlaySlider_ValueChanged" />
+                    <Button Content="Поменять местами" Click="OverlaySwap_Click" />
+                </StackPanel>
+                <TextBlock x:Name="CompareHint" HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           Text="Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ  ·  1–9 убрать из сравнения  ·  Ctrl+колесо зум  ·  L синхронизация  ·  O наложение  ·  Esc назад" />
+            </StackPanel>
         </Grid>
 
         <!-- Tournament: two photos, pick the better one; at the end, the winners in order. -->
@@ -413,6 +494,87 @@
 
             <TextBlock x:Name="TournamentHint" Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,14" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                        Text="← или 1 — левое лучше  ·  → или 2 — правое лучше  ·  клик по фото тоже выбирает  ·  Backspace назад  ·  Esc выйти" />
+        </Grid>
+
+        <!-- Editor: crop for Instagram and a few sliders. The photo itself is never changed. -->
+        <Grid x:Name="EditorView" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Background="{StaticResource LoupeBackgroundBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="340" />
+            </Grid.ColumnDefinitions>
+
+            <Grid x:Name="EditorStage" Grid.Column="0" Margin="24" Background="Transparent" SizeChanged="EditorStage_SizeChanged"
+                  PointerPressed="EditorStage_PointerPressed" PointerMoved="EditorStage_PointerMoved"
+                  PointerReleased="EditorStage_PointerReleased" PointerCaptureLost="EditorStage_PointerCaptureLost">
+                <Image x:Name="EditorImage" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" SizeChanged="EditorImage_SizeChanged" />
+                <Canvas x:Name="EditorOverlay" IsHitTestVisible="False">
+                    <Path x:Name="EditorShade" Fill="#AA000000">
+                        <Path.Data>
+                            <GeometryGroup FillRule="EvenOdd">
+                                <RectangleGeometry x:Name="EditorShadeOuter" />
+                                <RectangleGeometry x:Name="EditorShadeInner" />
+                            </GeometryGroup>
+                        </Path.Data>
+                    </Path>
+                    <Line x:Name="EditorThird1" Stroke="#66FFFFFF" StrokeThickness="1" />
+                    <Line x:Name="EditorThird2" Stroke="#66FFFFFF" StrokeThickness="1" />
+                    <Line x:Name="EditorThird3" Stroke="#66FFFFFF" StrokeThickness="1" />
+                    <Line x:Name="EditorThird4" Stroke="#66FFFFFF" StrokeThickness="1" />
+                    <Rectangle x:Name="EditorFrame" Stroke="White" StrokeThickness="1.5" />
+                    <Rectangle x:Name="EditorHandleTL" Width="14" Height="14" Fill="White" RadiusX="2" RadiusY="2" />
+                    <Rectangle x:Name="EditorHandleTR" Width="14" Height="14" Fill="White" RadiusX="2" RadiusY="2" />
+                    <Rectangle x:Name="EditorHandleBL" Width="14" Height="14" Fill="White" RadiusX="2" RadiusY="2" />
+                    <Rectangle x:Name="EditorHandleBR" Width="14" Height="14" Fill="White" RadiusX="2" RadiusY="2" />
+                </Canvas>
+                <ProgressRing x:Name="EditorLoading" IsActive="False" Width="48" Height="48" />
+                <Border x:Name="EditorBeforeBadge" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8" Padding="10,4" CornerRadius="8"
+                        Background="#CC000000" Visibility="Collapsed" IsHitTestVisible="False">
+                    <TextBlock Text="До правок" FontSize="12" />
+                </Border>
+            </Grid>
+
+            <Grid Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Row="0" Padding="20,16,20,8" Spacing="2">
+                    <TextBlock Text="Кроп и цвет" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock x:Name="EditorName" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <ScrollViewer Grid.Row="1" Padding="20,0">
+                    <StackPanel Spacing="14" Padding="0,8,0,16">
+                        <TextBlock Text="Кадр" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <GridView x:Name="EditorAspects" SelectionMode="Single" SelectionChanged="EditorAspects_SelectionChanged" IsItemClickEnabled="False" Margin="-4,0,0,0">
+                            <GridView.ItemContainerStyle>
+                                <Style TargetType="GridViewItem">
+                                    <Setter Property="Margin" Value="4" />
+                                </Style>
+                            </GridView.ItemContainerStyle>
+                        </GridView>
+                        <TextBlock x:Name="EditorCropInfo" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        <StackPanel x:Name="EditorSliders" Spacing="4" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Сбросить всё" Click="EditorReset_Click" />
+                            <ToggleButton x:Name="EditorBeforeButton" Content="До / после" Click="EditorBefore_Click" ToolTipService.ToolTip="Показать фото без правок (\)" />
+                        </StackPanel>
+                        <Button Content="Вставить цвет из скопированного" x:Name="EditorPasteButton" Click="EditorPaste_Click" Visibility="Collapsed" />
+                        <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextWrapping="Wrap"
+                                   Text="Перетащи рамку, чтобы сдвинуть кадр, а угол — чтобы изменить размер. Двойной клик по ползунку сбрасывает его. Оригинал не меняется: правки хранятся в Lumy, а для RAW ещё и в .xmp для Lightroom." />
+                    </StackPanel>
+                </ScrollViewer>
+                <Grid Grid.Row="2" Padding="20,12,20,16" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Content="Отмена" HorizontalAlignment="Stretch" Click="EditorCancel_Click" ToolTipService.ToolTip="Esc" />
+                    <Button Grid.Column="1" Content="Экспорт…" HorizontalAlignment="Stretch" Click="EditorExport_Click" ToolTipService.ToolTip="Сохранить и выгрузить JPEG (Ctrl+E)" />
+                    <Button Grid.Column="2" Content="Готово" HorizontalAlignment="Stretch" Style="{StaticResource AccentButtonStyle}" Click="EditorDone_Click" ToolTipService.ToolTip="Сохранить правки (Enter)" />
+                </Grid>
+            </Grid>
         </Grid>
 
         <!-- Toast for short confirmations ("Автопереход выключен", "Не удалось записать XMP"). -->

@@ -32,6 +32,7 @@
 
   /* Several photos at once: the duel, the comparison, the winners. */
   #multi { position: absolute; inset: 0; display: grid; gap: 6px; padding: 6px; touch-action: manipulation; }
+  #multi[hidden] { display: none; }
   #multi.duel { grid-template-rows: 1fr 1fr; }
   @media (orientation: landscape) { #multi.duel { grid-template-rows: none; grid-template-columns: 1fr 1fr; } }
   .tile { position: relative; border-radius: 10px; overflow: hidden; background: #000; border: 2px solid transparent; min-height: 0; }
@@ -83,6 +84,20 @@
     background: var(--accent); color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; }
   #gridBar { padding-top: 8px; }
 
+  /* Editor: the crop frame over the preview, the shapes and the sliders. */
+  #crop { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px #0009; pointer-events: none; border-radius: 2px;
+    background-image: linear-gradient(#fff5, #fff5), linear-gradient(#fff5, #fff5), linear-gradient(#fff5, #fff5), linear-gradient(#fff5, #fff5);
+    background-size: 1px 100%, 1px 100%, 100% 1px, 100% 1px; background-repeat: no-repeat;
+    background-position: 33.33% 0, 66.67% 0, 0 33.33%, 0 66.67%; }
+  #crop[hidden] { display: none; }
+  #editPanel { max-height: 46vh; overflow-y: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  #editPanel[hidden], #overlayPanel[hidden] { display: none; }
+  .slider { display: grid; grid-template-columns: 96px 1fr 46px; align-items: center; gap: 8px; padding: 4px 2px; }
+  .slider span:last-child { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); height: 28px; }
+  #editPanel .chips, #overlayPanel .chips { margin-bottom: 8px; }
+  .row.small button { padding: 10px 4px; }
+
   #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%);
     background: #2b2b31; color: var(--text); padding: 10px 16px; border-radius: 12px; max-width: 90vw; text-align: center;
     font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; box-shadow: 0 6px 24px #0008; }
@@ -101,6 +116,7 @@
   <div id="stage">
     <img id="photo" alt="">
     <div id="multi" hidden></div>
+    <div id="crop" hidden></div>
     <div id="hint"></div>
     <div id="empty">Откройте папку с фото в Lumy на компьютере</div>
   </div>
@@ -123,6 +139,43 @@
     <button data-cmd="next-unrated">Без оценки ›</button>
     <button data-cmd="next">След. ›</button>
   </div>
+  <div id="editPanel" hidden>
+    <div class="chips" id="aspects"></div>
+    <div class="row small">
+      <button data-nudge="-0.02:0:1">←</button>
+      <button data-nudge="0:-0.02:1">↑</button>
+      <button data-nudge="0:0.02:1">↓</button>
+      <button data-nudge="0.02:0:1">→</button>
+      <button data-nudge="0:0:0.9">−</button>
+      <button data-nudge="0:0:1.1">＋</button>
+    </div>
+    <div id="sliders"></div>
+    <div class="row small">
+      <button data-cmd="edit-reset">Сбросить</button>
+      <button id="beforeBtn" data-cmd="edit-before">До / после</button>
+      <button id="pasteBtn" data-cmd="edit-paste" hidden>Вставить цвет</button>
+    </div>
+    <div class="row small">
+      <button data-cmd="prev">‹ Пред.</button>
+      <button id="editCancel">Отмена</button>
+      <button data-cmd="export">Экспорт</button>
+      <button data-cmd="edit-save">Готово</button>
+      <button data-cmd="next">След. ›</button>
+    </div>
+  </div>
+  <div id="overlayPanel" hidden>
+    <div class="chips">
+      <button class="chip" id="wipeChip">Шторка</button>
+      <button class="chip" id="fadeChip">Прозрачность</button>
+      <button class="chip" data-cmd="overlay-swap">⇄ Поменять</button>
+    </div>
+    <input type="range" id="overlayRange" min="0" max="1" step="0.01" value="0.5">
+  </div>
+  <div class="row" id="albumRow" hidden>
+    <button id="earlierBtn">◀ Раньше</button>
+    <button id="laterBtn">Позже ▶</button>
+    <button id="albumRemoveBtn">Убрать из альбома</button>
+  </div>
   <div class="row" id="winnersRow" hidden>
     <button data-cmd="winners-super">★ Всем</button>
     <button data-cmd="winners-show">В галерее</button>
@@ -132,6 +185,9 @@
     <button data-cmd="undo">↶ Отменить</button>
     <button id="openBtn" data-cmd="open">Открыть</button>
     <button id="removeBtn" data-cmd="remove" hidden>Убрать</button>
+    <button id="overlayBtn" data-cmd="overlay" hidden>Наложить</button>
+    <button id="editBtn" data-cmd="edit" hidden>✎ Кроп</button>
+    <button id="toAlbumBtn" hidden>＋ Альбом</button>
     <button id="skipBtn" data-cmd="skip" hidden>↓ Потом</button>
     <button id="zoomBtn" data-cmd="zoom" hidden>100%</button>
     <button id="backBtn" data-cmd="back">Выйти</button>
@@ -143,6 +199,13 @@
     <div class="body">
       <h3>Папки</h3>
       <div class="list" id="folders"></div>
+
+      <h3>Альбомы</h3>
+      <div class="list" id="albumList"></div>
+
+      <h3>Экспорт для Instagram</h3>
+      <div class="chips" id="exports"></div>
+      <div class="tip" style="text-align:left;padding-top:6px">Размер, качество и папка как в последний раз на компьютере. Кроп и цвет применяются.</div>
 
       <h3>Фильтр</h3>
       <div class="chips" id="filters"></div>
@@ -185,8 +248,14 @@
     <div class="row" id="gridBar" hidden>
       <button id="gridCompare">Сравнить</button>
       <button id="gridTournament">Турнир</button>
+      <button id="gridAlbum">В альбом</button>
       <button class="danger" id="gridDelete">В корзину</button>
     </div>
+  </section>
+
+  <section class="sheet" id="albums">
+    <header><h2>В альбом</h2><button class="icon" style="margin-left:auto" data-close="albums">✕</button></header>
+    <div class="body"><div class="list" id="albumTargets"></div></div>
   </section>
 
   <div id="toast"></div>
@@ -199,7 +268,11 @@
   const glyph = { like: '♥', superLike: '★', rejected: '✕', none: '' };
   const tierClass = { like: 'like', superLike: 'super', rejected: 'reject', none: '' };
   const modeName = { empty: 'нет фото', gallery: 'галерея', loupe: 'просмотр', swipe: 'свайп', 'swipe-done': 'свайп завершён',
-    compare: 'сравнение', tournament: 'турнир', 'tournament-done': 'итоги турнира' };
+    compare: 'сравнение', tournament: 'турнир', 'tournament-done': 'итоги турнира', editor: 'кроп и цвет' };
+  const aspects = [['Original', 'Оригинал'], ['Portrait', '4:5'], ['Square', '1:1'], ['Landscape', '1.91:1'], ['Story', '9:16'], ['Free', 'Свободно']];
+  const sliders = [['exposure', 'Экспозиция', -3, 3, 0.05], ['contrast', 'Контраст', -100, 100, 1], ['highlights', 'Света', -100, 100, 1],
+    ['shadows', 'Тени', -100, 100, 1], ['temperature', 'Температура', -100, 100, 1], ['tint', 'Оттенок', -100, 100, 1],
+    ['saturation', 'Насыщенность', -100, 100, 1], ['vibrance', 'Сочность', -100, 100, 1]];
   const filters = [['All', 'Все', c => c.all], ['LikedOrBetter', 'Лайки', c => c.liked + c.superLiked], ['SuperLikes', 'Суперлайки', c => c.superLiked],
     ['Unrated', 'Без оценки', c => c.unrated], ['Rejected', 'Отклонённые', c => c.rejected]];
   const sorts = [['CaptureTime', 'По времени съёмки'], ['Name', 'По имени']];
@@ -235,9 +308,10 @@
     const prev = state;
     state = s;
     const m = s.mode, swipe = m === 'swipe', duel = m === 'tournament', done = m === 'tournament-done', compare = m === 'compare';
-    const multi = duel || done || compare;
+    const multi = duel || done || compare, editor = m === 'editor', browse = m === 'gallery' || m === 'loupe';
+    s.albums = s.albums || [];
     $('mode').textContent = modeName[m] || m;
-    $('folder').textContent = s.folder || 'Lumy';
+    $('folder').textContent = s.album ? `Альбом: ${s.album.name}` : (s.folder || 'Lumy');
 
     $('empty').style.display = (s.photoId == null && !(multi && s.photos.length)) ? 'flex' : 'none';
     $('empty').textContent = m === 'swipe-done' ? `Готово: ♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}`
@@ -256,9 +330,22 @@
 
     $('duelRow').hidden = !duel;
     $('winnersRow').hidden = !done;
-    $('rateRow').hidden = duel || done || m === 'swipe-done' || m === 'empty';
+    $('rateRow').hidden = duel || done || editor || m === 'swipe-done' || m === 'empty';
     $('rateRow').querySelectorAll('button').forEach(b => b.disabled = compare && !focused);
-    $('navRow').hidden = !(m === 'gallery' || m === 'loupe');
+    $('navRow').hidden = !browse;
+    $('toolsRow').hidden = editor;
+    $('editPanel').hidden = !editor;
+    $('crop').hidden = !editor;
+    if (editor) renderEditor(s);
+    $('overlayPanel').hidden = !(compare && s.overlay);
+    if (compare && s.overlay) renderOverlay(s);
+    $('overlayBtn').hidden = !(compare && s.photos.length >= 2);
+    $('overlayBtn').textContent = s.overlay ? 'Сетка' : 'Наложить';
+    $('editBtn').hidden = !(browse && s.photoId != null);
+    $('toAlbumBtn').hidden = !((browse && s.photoId != null) || compare || done);
+    $('albumRow').hidden = !(s.album && browse && s.photoId != null);
+    $('earlierBtn').disabled = !(s.position > 1);
+    $('laterBtn').disabled = !(s.position < s.total);
     const open = m === 'gallery' || (compare && focused);
     $('openBtn').hidden = !open;
     $('removeBtn').hidden = !(compare && focused && s.photos.length > 1);
@@ -266,10 +353,13 @@
     $('zoomBtn').hidden = m !== 'loupe';
     $('backBtn').hidden = m === 'gallery' || m === 'empty';
     $('backBtn').textContent = m === 'loupe' ? 'К сетке' : 'Выйти';
-    $('tip').textContent = swipe ? 'По фото: → лайк · ↑ суперлайк · ← отказ · ↓ потом'
+    $('tip').textContent = editor ? 'Тяни рамку пальцем · цвет виден на экране компьютера'
+      : compare && s.overlay ? (s.overlay === 'wipe' ? 'Двигай ползунок: шторка между двумя фото' : 'Двигай ползунок: сколько видно верхнего фото')
+      : swipe ? 'По фото: → лайк · ↑ суперлайк · ← отказ · ↓ потом'
       : duel ? 'Нажмите на фото, которое лучше' : compare ? (focused ? 'Оценка применяется к выбранному фото' : 'Нажмите на фото, чтобы выбрать его')
       : done ? 'Нажмите на фото, чтобы открыть его на компьютере' : (m === 'gallery' || m === 'loupe') ? 'По фото: ← → листать' : '';
 
+    if (editor && s.editor && s.editor.info) $('detail').textContent = s.editor.info;
     if (!multi && s.photoId !== shownId) {
       shownId = s.photoId;
       const img = $('photo');
@@ -284,7 +374,110 @@
     lastMessage = s.messageId;
     renderMenu(s);
     if ($('browser').classList.contains('open')) refreshGrid();
+    if ($('albums').classList.contains('open')) renderAlbumTargets();
+
+    // The frame goes on last, once every row above and below the photo has its final size.
+    if (editor) { drawCrop(); requestAnimationFrame(() => drawCrop()); }
   }
+
+  // ---------- Editor ----------
+
+  const sliderInputs = {};
+  let activeSlider = null, activeTimer, sendTimer;
+  (function buildEditor() {
+    const box = $('sliders');
+    for (const [name, label, min, max, step] of sliders) {
+      const row = document.createElement('label');
+      row.className = 'slider';
+      row.innerHTML = `<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" value="0"><span>0</span>`;
+      const input = row.querySelector('input'), value = row.lastElementChild;
+      const show = v => value.textContent = (v > 0 ? '+' : '') + (step < 1 ? Number(v).toFixed(2) : Math.round(v));
+      input.addEventListener('input', () => {
+        activeSlider = name; clearTimeout(activeTimer); show(input.value);
+        clearTimeout(sendTimer); sendTimer = setTimeout(() => send('edit-set', `${name}:${input.value}`), 60);
+      });
+      input.addEventListener('change', () => {
+        clearTimeout(sendTimer); send('edit-set', `${name}:${input.value}`);
+        activeTimer = setTimeout(() => { activeSlider = null; }, 400);
+      });
+      row.firstElementChild.addEventListener('dblclick', () => { input.value = 0; show(0); send('edit-set', `${name}:0`); });
+      sliderInputs[name] = { input, show };
+      box.appendChild(row);
+    }
+  })();
+
+  function renderEditor(s) {
+    const e = s.editor;
+    if (!e) return;
+    const a = $('aspects'); a.innerHTML = '';
+    aspects.forEach(([tag, text]) => a.appendChild(chip(text, e.aspect === tag, () => send('edit-aspect', tag))));
+    for (const [name, control] of Object.entries(sliderInputs)) {
+      if (name === activeSlider || e.values[name] == null) continue;
+      control.input.value = e.values[name]; control.show(e.values[name]);
+    }
+    $('beforeBtn').style.borderColor = e.before ? 'var(--accent)' : '';
+    $('pasteBtn').hidden = !e.canPaste;
+  }
+
+  function drawCrop(dx = 0, dy = 0) {
+    const e = state.editor, frame = $('crop');
+    if (!e || state.mode !== 'editor' || !img.naturalWidth) { frame.hidden = true; return; }
+    const st = stage.getBoundingClientRect(), r = img.getBoundingClientRect();
+    const [x, y, w, h] = e.crop;
+    frame.hidden = false;
+    frame.style.left = `${r.left - st.left + x * r.width + dx}px`;
+    frame.style.top = `${r.top - st.top + y * r.height + dy}px`;
+    frame.style.width = `${w * r.width}px`;
+    frame.style.height = `${h * r.height}px`;
+  }
+
+  document.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => send('edit-crop', b.dataset.nudge)));
+  $('editCancel').addEventListener('click', () => {
+    if (confirm('Выйти без сохранения? Изменения кадра и цвета пропадут.')) send('edit-cancel');
+  });
+  addEventListener('resize', () => drawCrop());
+
+  // ---------- Overlay ----------
+
+  let overlayTimer, overlayActive = false;
+  function renderOverlay(s) {
+    $('wipeChip').classList.toggle('on', s.overlay === 'wipe');
+    $('fadeChip').classList.toggle('on', s.overlay === 'fade');
+    if (!overlayActive) $('overlayRange').value = s.overlayValue;
+  }
+  $('wipeChip').addEventListener('click', () => send('overlay-mode', 'wipe'));
+  $('fadeChip').addEventListener('click', () => send('overlay-mode', 'fade'));
+  $('overlayRange').addEventListener('input', e => {
+    overlayActive = true; clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(() => send('overlay-value', e.target.value), 40);
+  });
+  $('overlayRange').addEventListener('change', e => { send('overlay-value', e.target.value); setTimeout(() => { overlayActive = false; }, 400); });
+
+  // ---------- Albums ----------
+
+  let albumIds = null;
+  function openAlbumPicker(ids) { albumIds = ids; renderAlbumTargets(); open('albums'); }
+  function renderAlbumTargets() {
+    const box = $('albumTargets'); box.innerHTML = '';
+    const add = (text, onClick, cls) => {
+      const b = document.createElement('button'); b.textContent = text; if (cls) b.className = cls;
+      b.addEventListener('click', () => { onClick(); close('albums'); }); box.appendChild(b);
+    };
+    const suffix = albumIds ? `|${albumIds}` : '';
+    add('＋ Новый альбом…', () => {
+      const name = prompt('Название альбома', state.folder || 'Новый альбом');
+      if (name && name.trim()) send('album-new', name.trim() + suffix);
+    }, 'on');
+    for (const a of state.albums || []) {
+      if (state.album && a.id === state.album.id) continue;
+      add(`${a.name} · ${a.count}`, () => send('album-add', albumIds ? `${a.id}:${albumIds}` : a.id));
+    }
+  }
+  $('toAlbumBtn').addEventListener('click', () => openAlbumPicker(null));
+  $('gridAlbum').addEventListener('click', () => { if (picked.size) { openAlbumPicker(ids()); setPicking(false); } });
+  $('earlierBtn').addEventListener('click', () => send('album-move', `${state.photoId}:${state.position - 2}`));
+  $('laterBtn').addEventListener('click', () => send('album-move', `${state.photoId}:${state.position}`));
+  $('albumRemoveBtn').addEventListener('click', () => send('album-remove', state.photoId));
 
   function renderMulti(s) {
     const box = $('multi'), duel = s.mode === 'tournament', done = s.mode === 'tournament-done';
@@ -337,11 +530,17 @@
 
   const stage = $('stage'), img = $('photo'), hint = $('hint');
   let start = null;
+  let cropDrag = null;
+  img.addEventListener('load', () => drawCrop());
   stage.addEventListener('pointerdown', e => {
+    if (state.mode === 'editor') {
+      cropDrag = { x: e.clientX, y: e.clientY }; stage.setPointerCapture(e.pointerId); return;
+    }
     if (!$('multi').hidden) return;
     start = { x: e.clientX, y: e.clientY }; img.classList.add('dragging'); stage.setPointerCapture(e.pointerId);
   });
   stage.addEventListener('pointermove', e => {
+    if (cropDrag) { drawCrop(e.clientX - cropDrag.x, e.clientY - cropDrag.y); return; }
     if (!start) return;
     const dx = e.clientX - start.x, dy = e.clientY - start.y;
     img.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 20}deg)`;
@@ -350,6 +549,13 @@
     hint.style.opacity = move ? Math.min(1, move.strength) : 0;
   });
   const end = e => {
+    if (cropDrag) {
+      const r = img.getBoundingClientRect(), dx = e.clientX - cropDrag.x, dy = e.clientY - cropDrag.y;
+      cropDrag = null;
+      if (r.width && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) send('edit-crop', `${(dx / r.width).toFixed(4)}:${(dy / r.height).toFixed(4)}:1`);
+      else drawCrop();
+      return;
+    }
     if (!start) return;
     const dx = e.clientX - start.x, dy = e.clientY - start.y;
     start = null; img.classList.remove('dragging'); hint.style.opacity = 0;
@@ -402,6 +608,25 @@
       folders.appendChild(b);
     });
 
+    const al = $('albumList'); al.innerHTML = '';
+    const albumButton = (text, cls, onClick) => {
+      const b = document.createElement('button'); b.textContent = text; b.className = cls;
+      b.addEventListener('click', () => { onClick(); close('menu'); }); al.appendChild(b);
+    };
+    for (const a of s.albums || []) {
+      const on = s.album && s.album.id === a.id;
+      albumButton(`${on ? '● ' : ''}${a.name} · ${a.count}`, on ? 'on' : '', () => send('album', a.id));
+    }
+    if (s.album) albumButton('Закрыть альбом и вернуться к папке', '', () => send('album-close'));
+    if (!(s.albums || []).length) al.innerHTML = '<div class="tip" style="text-align:left">Альбомов пока нет. Откройте фото и нажмите «＋ Альбом»</div>';
+
+    const ex = $('exports'); ex.innerHTML = '';
+    if (s.photoId != null && (s.mode === 'gallery' || s.mode === 'loupe' || s.mode === 'editor')) ex.appendChild(chip('Это фото', false, () => { send('export'); close('menu'); }));
+    if (s.mode === 'compare') ex.appendChild(chip(`Сравниваемые (${s.photos.length})`, false, () => { send('export'); close('menu'); }));
+    if (s.album) ex.appendChild(chip(`Весь альбом (${s.album.count})`, false, () => { send('export', 'album'); close('menu'); }));
+    if (likesCount(s)) ex.appendChild(chip(`Лайки (${likesCount(s)})`, false, () => { send('export', 'likes'); close('menu'); }));
+    if (s.counts.superLiked) ex.appendChild(chip(`Суперлайки (${s.counts.superLiked})`, false, () => { send('export', 'supers'); close('menu'); }));
+
     const f = $('filters'); f.innerHTML = '';
     filters.forEach(([tag, text, count]) => f.appendChild(chip(`${text} ${s.counts.all != null ? count(s.counts) : ''}`, s.filter === tag, () => send('filter', tag))));
     const so = $('sorts'); so.innerHTML = '';
@@ -420,6 +645,8 @@
     $('fullChip').classList.toggle('on', !!s.fullScreen);
     $('deleteCurrent').hidden = !(s.mode === 'gallery' || s.mode === 'loupe') || s.photoId == null;
   }
+
+  function likesCount(s) { return (s.counts.liked || 0) + (s.counts.superLiked || 0); }
 
   $('startTournament').addEventListener('click', () => send('tournament', `${pool}:${size}`));
   $('deleteCurrent').addEventListener('click', () => {

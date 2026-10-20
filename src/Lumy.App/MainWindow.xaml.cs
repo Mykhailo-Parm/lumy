@@ -117,11 +117,7 @@ public sealed partial class MainWindow : Window
         _loading?.Cancel();
         var cancellation = _loading = new CancellationTokenSource();
 
-        CloseLoupe();
-        if (InSwipe)
-            CloseSwipe();
-        if (InCompare)
-            CloseCompare();
+        LeaveScreens();
         EmptyState.Visibility = Visibility.Collapsed;
         LoadingRing.IsActive = true;
         FolderTitle.Text = folder;
@@ -138,15 +134,9 @@ public sealed partial class MainWindow : Window
             _settings.LastFolder = folder;
             _settings.AddRecentFolder(folder);
             RefreshRecentFolders();
-            _loupeCache.Clear();
-            _details.Clear();
-            _galleryThumbnails.ReleaseAll();
-            _filmstripThumbnails.ReleaseAll();
-            _all = records.Select(r => new PhotoItem(r)).ToList();
-            _remoteRecords = _all.ToDictionary(p => p.Id, p => p.Record);
-            ApplyFilter();
+            _album = null;
+            ShowPhotos(records);
             RestoreLastPhoto(folder);
-            _ = DetectSeriesAsync(_all);
         }
         catch (OperationCanceledException)
         {
@@ -154,6 +144,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             ShowToast($"Не удалось открыть папку: {ex.Message}");
+            UpdateAlbumBar();
         }
         finally
         {
@@ -161,6 +152,36 @@ public sealed partial class MainWindow : Window
                 LoadingRing.IsActive = false;
             EmptyState.Visibility = _all.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
+    }
+
+    /// <summary>Closes whatever is over the gallery before other photos are shown in it.</summary>
+    private void LeaveScreens()
+    {
+        if (InEditor)
+            CloseEditor();
+        CloseLoupe();
+        if (InSwipe)
+            CloseSwipe();
+        if (InCompare)
+            CloseCompare();
+    }
+
+    /// <summary>Puts photos in the gallery: a folder's, or an album's in the album's order.</summary>
+    private void ShowPhotos(IReadOnlyList<PhotoRecord> records)
+    {
+        _loupeCache.Clear();
+        _details.Clear();
+        _galleryThumbnails.ReleaseAll();
+        _filmstripThumbnails.ReleaseAll();
+        _all = records.Select(r => new PhotoItem(r)).ToList();
+        var edits = _database.GetEdits(_all.Select(p => p.Id));
+        foreach (var photo in _all)
+            if (edits.TryGetValue(photo.Id, out var edit))
+                photo.Edit = edit;
+        _remoteRecords = _all.ToDictionary(p => p.Id, p => p.Record);
+        UpdateAlbumBar();
+        ApplyFilter();
+        _ = DetectSeriesAsync(_all);
     }
 
     private void RootGrid_DragOver(object sender, DragEventArgs e)
@@ -192,6 +213,7 @@ public sealed partial class MainWindow : Window
 
         UpdateCounter();
         ApplyThumbnailSize();
+        UpdateAlbumReorder();
         if (_visible.Count > 0)
             Gallery.SelectedIndex = 0;
         PublishRemotePhotos();
@@ -207,7 +229,9 @@ public sealed partial class MainWindow : Window
         // Also fires from InitializeComponent, before the settings exist.
         if (_settings is not null && !_restoringSort)
             _settings.Sort = CurrentSort.ToString();
-        if (_all.Count == 0)
+
+        // An album keeps the order it was given.
+        if (_all.Count == 0 || _album is not null)
             return;
 
         var byId = _all.ToDictionary(p => p.Id);
@@ -495,7 +519,9 @@ public sealed partial class MainWindow : Window
     {
         var ctrl = IsDown(VirtualKey.Control);
         var shift = IsDown(VirtualKey.Shift);
-        if (InTournament)
+        if (InEditor)
+            e.Handled = HandleEditorKey(e.Key, ctrl);
+        else if (InTournament)
             e.Handled = HandleTournamentKey(e.Key, ctrl);
         else if (InSwipe)
             e.Handled = HandleSwipeKey(e.Key, ctrl, shift);
@@ -510,6 +536,7 @@ public sealed partial class MainWindow : Window
         switch (key)
         {
             case VirtualKey.O: _ = PickFolderAsync(); return true;
+            case VirtualKey.E: _ = ExportAsync(null); return true;
             case VirtualKey.C: _ = CopyPhotosAsync(CurrentPhotos(), pathsOnly: shift); return true;
             case VirtualKey.Z: UndoOrRedo(redo: shift); return true;
             case VirtualKey.Y: UndoOrRedo(redo: true); return true;
@@ -538,6 +565,7 @@ public sealed partial class MainWindow : Window
             case VirtualKey.S: StartSwipe(); return true;
             case VirtualKey.C: StartCompare(); return true;
             case VirtualKey.B: _ = SetUpTournamentAsync(); return true;
+            case VirtualKey.E: EditCurrent(); return true;
             case VirtualKey.Delete: _ = DeletePhotosAsync(CurrentPhotos()); return true;
         }
 
@@ -603,7 +631,11 @@ public sealed partial class MainWindow : Window
             ("C", "Сравнить выделенные фото или всю серию текущего фото"),
             ("1–9 (в сравнении)", "Убрать фото из сравнения; F / R / X оценивают фото под мышью"),
             ("Shift / Ctrl + клик в ленте", "Выбрать фото для сравнения, не меняя открытое; C — сравнить"),
+            ("O (в сравнении)", "Наложить два фото друг на друга: шторка за мышью, M — прозрачность, S — поменять местами"),
             ("B", "Турнир: выбрать лучшие N фото попарно (← → выбор, Backspace назад)"),
+            ("E", "Кроп для Instagram (4:5, 1:1, 1.91:1, 9:16) и цвет; \\ — до / после, Enter — готово"),
+            ("Ctrl+E", "Экспорт JPEG для Instagram: выделенные, лайки или альбом"),
+            ("Кнопка «Альбомы»", "Подборки для каруселей: правый клик → «Добавить в альбом», порядок — перетаскиванием"),
             ("F11", "Полноэкранный режим"),
             ("`", "Автопереход после оценки вкл/выкл"),
             ("Ctrl+O", "Открыть папку"),

@@ -115,6 +115,26 @@ public class CropMathTests
     }
 
     [Fact]
+    public void Scaling_keeps_the_centre_and_shape_and_stays_inside()
+    {
+        var frame = new CropRect(0.3, 0.2, 0.4, 0.5);
+        var smaller = CropMath.Scale(frame, 0.5);
+        Assert.Equal(0.2, smaller.Width, 6);
+        Assert.Equal(0.25, smaller.Height, 6);
+        Assert.Equal(0.5, smaller.X + smaller.Width / 2, 6);
+        Assert.Equal(0.45, smaller.Y + smaller.Height / 2, 6);
+
+        var bigger = CropMath.Scale(frame, 3);
+        Assert.Equal(1, bigger.Height, 6);
+        Assert.Equal(0.8, bigger.Width, 6);
+        Assert.True(bigger.X >= 0 && bigger.Right <= 1 + 1e-9 && bigger.Y >= 0 && bigger.Bottom <= 1 + 1e-9);
+
+        var tiny = CropMath.Scale(frame, 0.01);
+        Assert.True(tiny.Width >= CropMath.MinSize - 1e-9 && tiny.Height >= CropMath.MinSize - 1e-9);
+        Assert.Equal(0.8, tiny.Width / tiny.Height, 6);
+    }
+
+    [Fact]
     public void Hit_test_finds_corners_then_the_inside()
     {
         var r = new CropRect(0.2, 0.2, 0.6, 0.6);

@@ -66,6 +66,7 @@ public sealed partial class MainWindow
 
     private void CloseCompare()
     {
+        CloseOverlay();
         var focus = _hoveredCell?.Photo ?? (_compareCells.Count == 1 ? _compareCells[0].Photo : null);
         CompareView.Visibility = Visibility.Collapsed;
         CompareGrid.Children.Clear();
@@ -96,6 +97,9 @@ public sealed partial class MainWindow
             return false;
         }
 
+        if (InOverlay && HandleOverlayKey(key))
+            return true;
+
         if (key is >= VirtualKey.Number1 and <= VirtualKey.Number9 || key is >= VirtualKey.NumberPad1 and <= VirtualKey.NumberPad9)
         {
             var n = key >= VirtualKey.NumberPad1 ? key - VirtualKey.NumberPad1 : key - VirtualKey.Number1;
@@ -109,6 +113,7 @@ public sealed partial class MainWindow
             case VirtualKey.R: RateHovered(Tier.SuperLike); return true;
             case VirtualKey.X: RateHovered(Tier.Rejected); return true;
             case VirtualKey.Number0 or VirtualKey.NumberPad0: RateHovered(Tier.None); return true;
+            case VirtualKey.O: ToggleOverlay(); return true;
             case VirtualKey.L:
                 _syncCompare = !_syncCompare;
                 UpdateCompareInfo();
@@ -131,6 +136,8 @@ public sealed partial class MainWindow
 
         _ratings.Rate([cell.Photo], tier);
         RefreshCompareBadges();
+        if (InOverlay)
+            Flash(tier);
     }
 
     private void RemoveFromCompare(int index)
@@ -138,6 +145,7 @@ public sealed partial class MainWindow
         if (index < 0 || index >= _compareCells.Count || _compareCells.Count == 1)
             return;
 
+        CloseOverlay();
         if (_hoveredCell == _compareCells[index])
             _hoveredCell = null;
         _compareCells.RemoveAt(index);
@@ -148,6 +156,7 @@ public sealed partial class MainWindow
 
     private void BuildCompare(IReadOnlyList<PhotoItem> photos)
     {
+        CloseOverlay();
         CompareGrid.Children.Clear();
         _compareCells.Clear();
         _hoveredCell = null;
@@ -193,7 +202,9 @@ public sealed partial class MainWindow
 
     private void UpdateCompareInfo()
     {
-        CompareInfo.Text = $"{_compareCells.Count} фото  ·  синхронный зум {(_syncCompare ? "вкл" : "выкл")}";
+        CompareInfo.Text = InOverlay && _overlayLeft is { } left && _overlayRight is { } right
+            ? $"Наложение {_compareCells.IndexOf(left) + 1} и {_compareCells.IndexOf(right) + 1}  ·  {(_overlayFade ? "прозрачность" : "шторка")}"
+            : $"{_compareCells.Count} фото  ·  синхронный зум {(_syncCompare ? "вкл" : "выкл")}";
         PushRemoteState();
     }
 

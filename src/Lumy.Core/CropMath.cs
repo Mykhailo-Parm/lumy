@@ -51,6 +51,25 @@ public static class CropMath
     public static CropRect Move(CropRect rect, double dx, double dy) =>
         (rect with { X = rect.X + dx, Y = rect.Y + dy }).Clamped();
 
+    /// <summary>Makes the frame <paramref name="factor"/> times bigger around its centre, keeping its shape and staying inside the photo.</summary>
+    public static CropRect Scale(CropRect rect, double factor)
+    {
+        if (factor <= 0 || double.IsNaN(factor))
+            return rect;
+
+        var width = rect.Width * factor;
+        var height = rect.Height * factor;
+        var fit = Math.Min(1, Math.Min(1 / width, 1 / height));
+        width *= fit;
+        height *= fit;
+        var grow = Math.Max(1, Math.Max(MinSize / width, MinSize / height));
+        width = Math.Min(1, width * grow);
+        height = Math.Min(1, height * grow);
+        var centerX = rect.X + rect.Width / 2;
+        var centerY = rect.Y + rect.Height / 2;
+        return new CropRect(centerX - width / 2, centerY - height / 2, width, height).Clamped();
+    }
+
     /// <summary>
     /// Drags a corner to (<paramref name="x"/>, <paramref name="y"/>) while the opposite corner stays put, keeping the
     /// shape when <paramref name="aspect"/> has one, and never leaving the photo.

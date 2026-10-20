@@ -58,6 +58,63 @@ public enum RemoteCommand
     FullScreen,
     Filmstrip,
     AutoAdvance,
+
+    /// <summary>Open the editor on the current photo, or on the photo whose id is the arg.</summary>
+    Edit,
+
+    /// <summary>Move one slider; arg is "name:value", such as "exposure:0.5".</summary>
+    EditSet,
+
+    /// <summary>Choose the crop shape; arg is a <c>CropAspect</c> name.</summary>
+    EditAspect,
+
+    /// <summary>Nudge the crop frame; arg is "dx:dy:scale", the move in fractions of the photo and the size factor.</summary>
+    EditCrop,
+
+    EditReset,
+
+    /// <summary>Show the photo without the edit, or with it again.</summary>
+    EditBefore,
+
+    /// <summary>Paste the copied colour into the photo being edited.</summary>
+    EditPaste,
+
+    EditSave,
+
+    /// <summary>Leave the editor without saving, already confirmed on the phone.</summary>
+    EditCancel,
+
+    /// <summary>Export with the last settings and no dialog; arg is "album", "likes", "supers" or a comma-separated id list, empty for the current photo.</summary>
+    Export,
+
+    /// <summary>Open an album; arg is its id.</summary>
+    AlbumOpen,
+
+    /// <summary>Make an album of the current photo or the selection; arg is its name.</summary>
+    AlbumNew,
+
+    /// <summary>Add the current photo or the selection to an album; arg is its id.</summary>
+    AlbumAdd,
+
+    /// <summary>Take photos out of the open album; arg is a comma-separated id list, empty for the current photo.</summary>
+    AlbumRemove,
+
+    /// <summary>Move a photo within the open album; arg is "id:position", the position counted from 0.</summary>
+    AlbumMove,
+
+    /// <summary>Close the open album and go back to the folder.</summary>
+    AlbumClose,
+
+    /// <summary>In comparison, put two photos on top of each other, or back side by side.</summary>
+    Overlay,
+
+    /// <summary>arg: "wipe" or "fade".</summary>
+    OverlayMode,
+
+    /// <summary>Where the wipe is, or how much of the top photo shows; arg is 0 to 1.</summary>
+    OverlayValue,
+
+    OverlaySwap,
 }
 
 /// <summary>A command with its argument, if it takes one.</summary>
@@ -70,6 +127,12 @@ public readonly record struct RemoteRequest(RemoteCommand Command, string? Arg =
         (Arg ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(s => long.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : (long?)null)
             .OfType<long>()
+            .ToList();
+
+    /// <summary>The argument split on ':' into numbers, such as "0.1:0:1" for a crop nudge; parts that do not parse are NaN.</summary>
+    public IReadOnlyList<double> Values() =>
+        (Arg ?? "").Split(':', StringSplitOptions.TrimEntries)
+            .Select(s => double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : double.NaN)
             .ToList();
 }
 
@@ -107,6 +170,26 @@ public static class RemoteCommands
         ["fullscreen"] = RemoteCommand.FullScreen,
         ["filmstrip"] = RemoteCommand.Filmstrip,
         ["auto-advance"] = RemoteCommand.AutoAdvance,
+        ["edit"] = RemoteCommand.Edit,
+        ["edit-set"] = RemoteCommand.EditSet,
+        ["edit-aspect"] = RemoteCommand.EditAspect,
+        ["edit-crop"] = RemoteCommand.EditCrop,
+        ["edit-reset"] = RemoteCommand.EditReset,
+        ["edit-before"] = RemoteCommand.EditBefore,
+        ["edit-paste"] = RemoteCommand.EditPaste,
+        ["edit-save"] = RemoteCommand.EditSave,
+        ["edit-cancel"] = RemoteCommand.EditCancel,
+        ["export"] = RemoteCommand.Export,
+        ["album"] = RemoteCommand.AlbumOpen,
+        ["album-new"] = RemoteCommand.AlbumNew,
+        ["album-add"] = RemoteCommand.AlbumAdd,
+        ["album-remove"] = RemoteCommand.AlbumRemove,
+        ["album-move"] = RemoteCommand.AlbumMove,
+        ["album-close"] = RemoteCommand.AlbumClose,
+        ["overlay"] = RemoteCommand.Overlay,
+        ["overlay-mode"] = RemoteCommand.OverlayMode,
+        ["overlay-value"] = RemoteCommand.OverlayValue,
+        ["overlay-swap"] = RemoteCommand.OverlaySwap,
     };
 
     public static bool TryParse(string? name, out RemoteCommand command) =>

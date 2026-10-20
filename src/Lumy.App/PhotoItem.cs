@@ -19,6 +19,7 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
     private int _seriesId;
     private int _seriesSize = 1;
     private int _seriesPosition = 1;
+    private PhotoEdit? _edit;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -92,6 +93,26 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
         OnPropertyChanged(nameof(SeriesBadgeText));
         OnPropertyChanged(nameof(SeriesBadgeVisibility));
     }
+
+    /// <summary>The saved crop and sliders; null when the photo exports as it is.</summary>
+    public PhotoEdit? Edit
+    {
+        get => _edit;
+        set
+        {
+            var edit = value is null || value.IsEmpty ? null : value;
+            if (Equals(_edit, edit))
+                return;
+            _edit = edit;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(EditVisibility));
+            OnPropertyChanged(nameof(EditSummary));
+        }
+    }
+
+    public Visibility EditVisibility => _edit is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public string EditSummary => (_edit ?? PhotoEdit.None).Summary();
 
     /// <summary>The photo open in the viewer; the filmstrip frames it.</summary>
     public bool IsCurrent
