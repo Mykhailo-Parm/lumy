@@ -61,10 +61,13 @@ public sealed partial class MainWindow
             ShowInLoupe(_visible.IndexOf(photo));
             await Task.Delay(800);
 
+            // The scroll viewer applies a zoom on its next layout pass, so give it a moment before reading it.
             await ToggleZoomAsync();
             await Task.Delay(500);
+            Check(LoupeScroll.ZoomFactor > 1.2f, $"Z zooms to 100% (zoom {LoupeScroll.ZoomFactor:0.00})");
             await ToggleZoomAsync();
-            Check(LoupeScroll.ZoomFactor <= 1.01f, "zoom to 100% and back");
+            await Task.Delay(500);
+            Check(LoupeScroll.ZoomFactor <= 1.01f, $"Z again fits the photo (zoom {LoupeScroll.ZoomFactor:0.00})");
 
             Check(BuildPhotoMenu(CurrentPhotos()).Items.Count >= 10, "right-click menu has its actions");
             CloseLoupe();
