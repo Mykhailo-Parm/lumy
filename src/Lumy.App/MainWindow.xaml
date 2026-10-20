@@ -91,6 +91,15 @@
                                     Padding="5" CornerRadius="12" Background="#99000000">
                                 <FontIcon Glyph="{x:Bind TierGlyph, Mode=OneWay}" FontSize="14" Foreground="{x:Bind TierBrush, Mode=OneWay}" />
                             </Border>
+                            <Border Visibility="{x:Bind SeriesBadgeVisibility, Mode=OneWay}"
+                                    HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="6"
+                                    Padding="6,2" CornerRadius="8" Background="#99000000"
+                                    ToolTipService.ToolTip="Серия похожих кадров">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <FontIcon Glyph="&#xE8B9;" FontSize="11" />
+                                    <TextBlock Text="{x:Bind SeriesBadgeText, Mode=OneWay}" FontSize="11" />
+                                </StackPanel>
+                            </Border>
                         </Grid>
                     </DataTemplate>
                 </GridView.ItemTemplate>
@@ -148,7 +157,94 @@
 
             <TextBlock VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14"
                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                       Text="← → листать  ·  F лайк  ·  R суперлайк  ·  X отказ  ·  0 снять  ·  Z 100%  ·  Esc в галерею" />
+                       Text="← → листать  ·  F лайк  ·  R суперлайк  ·  X отказ  ·  0 снять  ·  Z 100%  ·  C сравнить серию  ·  Esc в галерею" />
+        </Grid>
+
+        <!-- Swipe mode: one card at a time, a decision per card. -->
+        <Grid x:Name="SwipeView" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Background="{StaticResource LoupeBackgroundBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Padding="20,12" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Свайп" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <ProgressBar x:Name="SwipeProgressBar" Grid.Column="1" VerticalAlignment="Center" Minimum="0" />
+                <TextBlock x:Name="SwipeProgressText" Grid.Column="2" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+
+            <Grid x:Name="SwipeStage" Grid.Row="1" Margin="24,0">
+                <Image x:Name="SwipeNextImage" Stretch="Uniform" Opacity="0.35" />
+                <Grid x:Name="SwipeCard" Background="Transparent" RenderTransformOrigin="0.5,0.5"
+                      ManipulationMode="TranslateX,TranslateY"
+                      ManipulationDelta="SwipeCard_ManipulationDelta"
+                      ManipulationCompleted="SwipeCard_ManipulationCompleted">
+                    <Grid.RenderTransform>
+                        <CompositeTransform x:Name="SwipeTransform" />
+                    </Grid.RenderTransform>
+                    <Image x:Name="SwipeImage" Stretch="Uniform" />
+                    <Border x:Name="SwipeHint" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="28" CornerRadius="60"
+                            Background="#88000000" Opacity="0" IsHitTestVisible="False">
+                        <FontIcon x:Name="SwipeHintIcon" FontSize="72" />
+                    </Border>
+                </Grid>
+                <TextBlock x:Name="SwipeSeriesText" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                <StackPanel x:Name="SwipeSummary" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16">
+                    <TextBlock Text="Готово" Style="{StaticResource TitleTextBlockStyle}" HorizontalAlignment="Center" />
+                    <TextBlock x:Name="SwipeSummaryText" HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                        <Button Content="Ещё раз по лайкам" Click="SwipeAgainLikes_Click" />
+                        <Button Content="Показать лайки" Click="SwipeShowLikes_Click" />
+                        <Button Content="В галерею" Style="{StaticResource AccentButtonStyle}" Click="SwipeClose_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20" Margin="0,12,0,20">
+                <Button Click="SwipeBack_Click" ToolTipService.ToolTip="Назад (Backspace)" Width="48" Height="48" CornerRadius="24">
+                    <FontIcon Glyph="&#xE7A7;" FontSize="16" />
+                </Button>
+                <Button Click="SwipeReject_Click" ToolTipService.ToolTip="Отказ (←), Shift+← вся серия" Width="64" Height="64" CornerRadius="32">
+                    <FontIcon Glyph="&#xE711;" FontSize="22" Foreground="{StaticResource RejectBrush}" />
+                </Button>
+                <Button Click="SwipeSkip_Click" ToolTipService.ToolTip="Решу потом (↓)" Width="48" Height="48" CornerRadius="24">
+                    <FontIcon Glyph="&#xE74B;" FontSize="16" />
+                </Button>
+                <Button Click="SwipeSuper_Click" ToolTipService.ToolTip="Суперлайк (↑)" Width="64" Height="64" CornerRadius="32">
+                    <FontIcon Glyph="&#xE735;" FontSize="22" Foreground="{StaticResource SuperLikeBrush}" />
+                </Button>
+                <Button Click="SwipeLike_Click" ToolTipService.ToolTip="Лайк (→)" Width="64" Height="64" CornerRadius="32">
+                    <FontIcon Glyph="&#xEB52;" FontSize="22" Foreground="{StaticResource LikeBrush}" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- Compare: 2 to 9 photos side by side, zoom and pan in sync. -->
+        <Grid x:Name="CompareView" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Background="{StaticResource LoupeBackgroundBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid Grid.Row="0" Padding="20,12" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Сравнение" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock x:Name="CompareInfo" Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Grid>
+            <Grid x:Name="CompareGrid" Grid.Row="1" Margin="8,0" SizeChanged="CompareGrid_SizeChanged" />
+            <TextBlock Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,14" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                       Text="Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ  ·  1–9 убрать из сравнения  ·  Ctrl+колесо зум  ·  L синхронизация  ·  Esc назад" />
         </Grid>
 
         <!-- Toast for short confirmations ("Автопереход выключен", "Не удалось записать XMP"). -->

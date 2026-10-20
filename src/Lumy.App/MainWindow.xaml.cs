@@ -98,6 +98,10 @@ public sealed partial class MainWindow : Window
         var cancellation = _loading = new CancellationTokenSource();
 
         CloseLoupe();
+        if (InSwipe)
+            CloseSwipe();
+        if (InCompare)
+            CloseCompare();
         EmptyState.Visibility = Visibility.Collapsed;
         LoadingRing.IsActive = true;
         FolderTitle.Text = folder;
@@ -114,6 +118,7 @@ public sealed partial class MainWindow : Window
             _loupeCache.Clear();
             _all = records.Select(r => new PhotoItem(r)).ToList();
             ApplyFilter();
+            _ = DetectSeriesAsync(_all);
         }
         catch (OperationCanceledException)
         {
@@ -314,7 +319,9 @@ public sealed partial class MainWindow : Window
         var item = _visible[_loupeIndex];
         LoupeName.Text = item.FileName;
         LoupeDetails.Text = item.Record.CapturedAt is { } taken ? $"{item.FormatLabel}  ·  {taken:dd.MM.yyyy HH:mm:ss}" : item.FormatLabel;
-        LoupePosition.Text = $"{_loupeIndex + 1} / {_visible.Count}";
+        LoupePosition.Text = item.SeriesSize > 1
+            ? $"серия {item.SeriesPosition}/{item.SeriesSize}  ·  {_loupeIndex + 1} / {_visible.Count}"
+            : $"{_loupeIndex + 1} / {_visible.Count}";
         LoupeTierIcon.Glyph = item.Tier == Tier.None ? "\uEB51" : item.TierGlyph; // empty heart when unrated
         LoupeTierIcon.Foreground = item.TierBrush ?? (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
     }
@@ -455,7 +462,12 @@ public sealed partial class MainWindow : Window
     {
         var ctrl = IsDown(VirtualKey.Control);
         var shift = IsDown(VirtualKey.Shift);
-        e.Handled = ctrl ? HandleCtrlKey(e.Key, shift) : HandleKey(e.Key, shift);
+        if (InSwipe)
+            e.Handled = HandleSwipeKey(e.Key, ctrl, shift);
+        else if (InCompare)
+            e.Handled = HandleCompareKey(e.Key, ctrl);
+        else
+            e.Handled = ctrl ? HandleCtrlKey(e.Key, shift) : HandleKey(e.Key, shift);
     }
 
     private bool HandleCtrlKey(VirtualKey key, bool shift)
@@ -487,6 +499,8 @@ public sealed partial class MainWindow : Window
             case (VirtualKey)191 when shift: ShowHelp(); return true; // ?
             case VirtualKey.F1: ShowHelp(); return true;
             case VirtualKey.F11: ToggleFullScreen(); return true;
+            case VirtualKey.S: StartSwipe(); return true;
+            case VirtualKey.C: StartCompare(); return true;
         }
 
         if (InLoupe)
@@ -539,6 +553,10 @@ public sealed partial class MainWindow : Window
             ("Ctrl + 0 / 1 / 2 / 3 / 4", "Все / Лайки / Суперлайки / Без оценки / Отклонённые"),
             ("Enter / Esc", "Открыть на весь экран / назад в галерею"),
             ("Z  или двойной клик", "Масштаб 100% и обратно"),
+            ("S", "Режим свайпа по фото без оценки: → лайк, ↑ суперлайк, ← отказ, ↓ потом, Backspace назад"),
+            ("Shift + ← (в свайпе)", "Отклонить всю серию похожих кадров"),
+            ("C", "Сравнить выделенные фото или всю серию текущего фото"),
+            ("1–9 (в сравнении)", "Убрать фото из сравнения; F / R / X оценивают фото под мышью"),
             ("F11", "Полноэкранный режим"),
             ("`", "Автопереход после оценки вкл/выкл"),
             ("Ctrl+O", "Открыть папку"),

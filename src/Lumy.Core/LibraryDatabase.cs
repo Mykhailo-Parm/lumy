@@ -14,6 +14,9 @@ public sealed record PhotoRecord(
     Tier Tier)
 {
     public string FileName => System.IO.Path.GetFileName(Path);
+
+    /// <summary>The <see cref="PerceptualHash"/> of the thumbnail, once the app has computed it.</summary>
+    public ulong? Hash { get; init; }
 }
 
 /// <summary>
@@ -23,7 +26,7 @@ public sealed record PhotoRecord(
 /// </summary>
 public sealed class LibraryDatabase : IDisposable
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
 
     private readonly SqliteConnection _connection;
     private readonly Lock _lock = new();
@@ -92,6 +95,7 @@ public sealed class LibraryDatabase : IDisposable
                 FileSize = file.FileSize,
                 ModifiedUtc = file.ModifiedUtc,
                 CapturedAt = captureTime(file.Path) ?? existing.CapturedAt,
+                Hash = null,
             };
             Update(updated);
             return updated;
@@ -138,6 +142,18 @@ public sealed class LibraryDatabase : IDisposable
         }
     }
 
+    /// <summary>Saves thumbnail hashes computed by the app, so they are only computed once per photo.</summary>
+    public void SetHashes(IEnumerable<(long Id, ulong Hash)> hashes)
+    {
+        lock (_lock)
+        {
+            using var transaction = _connection.BeginTransaction();
+            foreach (var (id, hash) in hashes)
+                Execute("UPDATE photos SET phash = $h WHERE id = $id", ("$h", unchecked((long)hash)), ("$id", id));
+            transaction.Commit();
+        }
+    }
+
     public string? GetSetting(string key)
     {
         lock (_lock)
@@ -158,6 +174,16 @@ public sealed class LibraryDatabase : IDisposable
         if (version >= SchemaVersion)
             return;
 
+        if (version < 1)
+            CreateSchemaV1();
+        if (version < 2)
+            Execute("ALTER TABLE photos ADD COLUMN phash INTEGER");
+
+        Execute($"PRAGMA user_version = {SchemaVersion}");
+    }
+
+    private void CreateSchemaV1()
+    {
         Execute(
             """
             CREATE TABLE IF NOT EXISTS photos (
@@ -177,16 +203,15 @@ public sealed class LibraryDatabase : IDisposable
                 value TEXT NOT NULL
             );
             """);
-        Execute($"PRAGMA user_version = {SchemaVersion}");
     }
 
     private void Update(PhotoRecord r) => Execute(
         """
-        UPDATE photos SET path = $p, raw_path = $r, fingerprint = $f, file_size = $s, modified_utc = $m, captured_at = $c, updated_utc = $u
+        UPDATE photos SET path = $p, raw_path = $r, fingerprint = $f, file_size = $s, modified_utc = $m, captured_at = $c, phash = $h, updated_utc = $u
         WHERE id = $id
         """,
         ("$p", r.Path), ("$r", r.RawPath), ("$f", r.Fingerprint), ("$s", r.FileSize), ("$m", r.ModifiedUtc.Ticks),
-        ("$c", r.CapturedAt?.Ticks), ("$u", DateTime.UtcNow.Ticks), ("$id", r.Id));
+        ("$c", r.CapturedAt?.Ticks), ("$h", r.Hash is { } h ? unchecked((long)h) : null), ("$u", DateTime.UtcNow.Ticks), ("$id", r.Id));
 
     private PhotoRecord? QuerySingle(string sql, params (string Name, object? Value)[] parameters) =>
         QueryMany(sql, parameters).FirstOrDefault();
@@ -206,7 +231,10 @@ public sealed class LibraryDatabase : IDisposable
                 reader.GetInt64(reader.GetOrdinal("file_size")),
                 new DateTime(reader.GetInt64(reader.GetOrdinal("modified_utc")), DateTimeKind.Utc),
                 reader.IsDBNull(reader.GetOrdinal("captured_at")) ? null : new DateTime(reader.GetInt64(reader.GetOrdinal("captured_at"))),
-                (Tier)reader.GetInt32(reader.GetOrdinal("tier"))));
+                (Tier)reader.GetInt32(reader.GetOrdinal("tier")))
+            {
+                Hash = reader.IsDBNull(reader.GetOrdinal("phash")) ? null : unchecked((ulong)reader.GetInt64(reader.GetOrdinal("phash"))),
+            });
         }
 
         return list;
