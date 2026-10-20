@@ -101,6 +101,16 @@ public class LibraryDatabaseTests
         Assert.False(settings.AutoAdvance);
         Assert.Equal(256.5, settings.ThumbnailSize);
         Assert.Null(settings.LastFolder);
+
+        Assert.False(settings.RemoteEnabled);
+        Assert.Null(settings.RemoteToken);
+        Assert.Null(settings.RemotePort);
+        settings.RemoteEnabled = true;
+        settings.RemoteToken = "abc";
+        settings.RemotePort = 8766;
+        Assert.True(settings.RemoteEnabled);
+        Assert.Equal("abc", settings.RemoteToken);
+        Assert.Equal(8766, settings.RemotePort);
     }
 
     [Fact]

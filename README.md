@@ -51,8 +51,22 @@ hash of the thumbnail.
 Ratings are also written to the `.xmp` sidecar of RAW files (Like = 4 stars,
 Super like = 5, Reject = −1), so Lightroom and Bridge see them.
 
+## Phone remote
+
+The **Телефон** button in the toolbar shows a QR code. Scan it with a phone on
+the same Wi-Fi and the phone becomes a remote: swipe the photo left/right to
+step through photos (in swipe mode: → like, ← reject, ↑ super like, ↓ later),
+tap ♥ ★ ✕ to rate, and open, zoom, undo or start swipe mode from the buttons.
+The phone shows the current photo and its rating.
+
+The remote is a small web server inside Lumy (port 8765, or the next free one),
+so nothing has to be installed on the phone. Every request must carry the
+secret code from the QR link; "Новый код" in the dialog unpairs old links.
+On first use Windows asks to allow Lumy through the firewall on private networks.
+
 ## Layout
 
 - `src/Lumy.Core` — folder scanning, library database, ratings, XMP. No UI, cross-platform, unit tested.
+- `src/Lumy.Remote` — the phone remote: web server, phone page, QR code. Cross-platform, unit tested.
 - `src/Lumy.App` — the WinUI 3 app.
-- `tests/Lumy.Core.Tests` — xUnit tests for the core (`dotnet test tests/Lumy.Core.Tests`).
+- `tests/Lumy.Core.Tests`, `tests/Lumy.Remote.Tests` — xUnit tests (`dotnet test tests/Lumy.Core.Tests`).

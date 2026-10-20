@@ -183,8 +183,11 @@ public sealed partial class MainWindow
         UpdateCompareInfo();
     }
 
-    private void UpdateCompareInfo() =>
+    private void UpdateCompareInfo()
+    {
         CompareInfo.Text = $"{_compareCells.Count} фото  ·  синхронный зум {(_syncCompare ? "вкл" : "выкл")}";
+        PushRemoteState();
+    }
 
     private void RefreshCompareBadges()
     {

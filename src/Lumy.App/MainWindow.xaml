@@ -31,6 +31,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <Button Grid.Column="0" Click="OpenFolder_Click" ToolTipService.ToolTip="Открыть папку (Ctrl+O)">
@@ -61,7 +62,14 @@
                 <Slider x:Name="SizeSlider" Width="140" Minimum="120" Maximum="420" StepFrequency="10" ValueChanged="SizeSlider_ValueChanged" VerticalAlignment="Center" />
             </StackPanel>
 
-            <Button Grid.Column="5" Click="Help_Click" ToolTipService.ToolTip="Клавиши (?)">
+            <Button Grid.Column="5" Click="Remote_Click" ToolTipService.ToolTip="Пульт: управлять Lumy с телефона">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE8EA;" FontSize="16" />
+                    <TextBlock x:Name="RemoteButtonText" Text="Телефон" />
+                </StackPanel>
+            </Button>
+
+            <Button Grid.Column="6" Click="Help_Click" ToolTipService.ToolTip="Клавиши (?)">
                 <FontIcon Glyph="&#xE765;" FontSize="16" />
             </Button>
         </Grid>

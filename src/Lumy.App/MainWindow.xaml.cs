@@ -57,12 +57,19 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         AppWindow.Resize(new SizeInt32(1440, 920));
-        Closed += (_, _) => _database.Dispose();
+        Closed += (_, _) =>
+        {
+            _ = _remote?.StopAsync();
+            _database.Dispose();
+        };
 
         Gallery.ItemsSource = _visible;
         SizeSlider.Value = _settings.ThumbnailSize;
         _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); Toast.Opacity = 0; };
         _flashTimer.Tick += (_, _) => { _flashTimer.Stop(); FlashBadge.Opacity = 0; };
+        Gallery.SelectionChanged += (_, _) => PushRemoteState();
+        if (_settings.RemoteEnabled)
+            _ = StartRemoteAsync(showErrors: false);
 
         var start = folder ?? _settings.LastFolder;
         if (!string.IsNullOrEmpty(start) && Directory.Exists(start))
@@ -117,6 +124,7 @@ public sealed partial class MainWindow : Window
             _settings.LastFolder = folder;
             _loupeCache.Clear();
             _all = records.Select(r => new PhotoItem(r)).ToList();
+            _remotePaths = _all.ToDictionary(p => p.Id, p => p.Path);
             ApplyFilter();
             _ = DetectSeriesAsync(_all);
         }
@@ -185,6 +193,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateCounter()
     {
+        PushRemoteState();
         if (_all.Count == 0)
         {
             CounterText.Text = "";
@@ -280,6 +289,7 @@ public sealed partial class MainWindow : Window
         if (AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen)
             AppWindow.SetPresenter(AppWindowPresenterKind.Default);
         Gallery.Focus(FocusState.Programmatic);
+        PushRemoteState();
     }
 
     private async void ShowInLoupe(int index)
@@ -315,6 +325,8 @@ public sealed partial class MainWindow : Window
     {
         if (_loupeIndex < 0 || _loupeIndex >= _visible.Count)
             return;
+
+        PushRemoteState();
 
         var item = _visible[_loupeIndex];
         LoupeName.Text = item.FileName;
@@ -561,6 +573,7 @@ public sealed partial class MainWindow : Window
             ("`", "Автопереход после оценки вкл/выкл"),
             ("Ctrl+O", "Открыть папку"),
             ("Ctrl + колесо", "Размер миниатюр"),
+            ("Кнопка «Телефон»", "Пульт: листать и оценивать с телефона по QR-коду"),
         ];
 
         var grid = new Grid { ColumnSpacing = 24, RowSpacing = 8 };
