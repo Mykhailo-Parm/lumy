@@ -101,6 +101,37 @@ public class LibraryDatabaseTests
         Assert.False(settings.AutoAdvance);
         Assert.Equal(256.5, settings.ThumbnailSize);
         Assert.Null(settings.LastFolder);
+
+        Assert.False(settings.RemoteEnabled);
+        Assert.Null(settings.RemoteToken);
+        Assert.Null(settings.RemotePort);
+        settings.RemoteEnabled = true;
+        settings.RemoteToken = "abc";
+        settings.RemotePort = 8766;
+        Assert.True(settings.RemoteEnabled);
+        Assert.Equal("abc", settings.RemoteToken);
+        Assert.Equal(8766, settings.RemotePort);
+    }
+
+    [Fact]
+    public void Recent_folders_are_newest_first_without_duplicates()
+    {
+        using var db = new LibraryDatabase(":memory:");
+        var settings = new AppSettings(db);
+        Assert.Empty(settings.RecentFolders);
+
+        settings.AddRecentFolder(@"D:\photos\a");
+        settings.AddRecentFolder(@"D:\photos\b");
+        settings.AddRecentFolder(@"d:\Photos\A\");
+        Assert.Equal([@"d:\Photos\A\", @"D:\photos\b"], settings.RecentFolders);
+
+        for (var i = 0; i < 20; i++)
+            settings.AddRecentFolder($@"E:\shoot{i}");
+        Assert.Equal(AppSettings.MaxRecentFolders, settings.RecentFolders.Count);
+        Assert.Equal(@"E:\shoot19", settings.RecentFolders[0]);
+
+        settings.ClearRecentFolders();
+        Assert.Empty(settings.RecentFolders);
     }
 
     [Fact]

@@ -18,22 +18,44 @@ jobs:
       - name: Test core
         run: dotnet test tests/Lumy.Core.Tests -c Release
 
+      - name: Test phone remote
+        run: dotnet test tests/Lumy.Remote.Tests -c Release
+
       - name: Build app (x64)
         run: dotnet publish src/Lumy.App -c Release -p:Platform=x64 -r win-x64 --self-contained -o artifacts/Lumy-win-x64
 
-      - name: Smoke test (Lumy starts and stays open)
+      - name: Make sample photos
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $dir = "$env:RUNNER_TEMP\photos"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          for ($i = 1; $i -le 40; $i++) {
+            $portrait = ($i % 5 -eq 0)
+            $w = if ($portrait) { 2000 } else { 3000 }
+            $h = if ($portrait) { 3000 } else { 2000 }
+            $bmp = New-Object System.Drawing.Bitmap $w, $h
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromArgb(($i * 37) % 255, ($i * 71) % 255, ($i * 113) % 255))
+            $g.FillEllipse([System.Drawing.Brushes]::White, $w / 4, $h / 4, $w / 2, $h / 2)
+            $g.Dispose()
+            $bmp.Save("$dir\IMG_$('{0:D4}' -f $i).JPG", [System.Drawing.Imaging.ImageFormat]::Jpeg)
+            $bmp.Dispose()
+          }
+          # A broken file, as left by an interrupted card copy: Lumy must skip it, not crash.
+          Set-Content "$dir\IMG_9999.JPG" "not a photo"
+
+      - name: Self-test (open a folder, go through every view, exit)
         shell: pwsh
         run: |
-          Get-ChildItem artifacts/Lumy-win-x64 -Filter *.pri | Format-Table Name, Length
-          $started = Get-Date
-          $p = Start-Process artifacts/Lumy-win-x64/Lumy.exe -PassThru
-          Start-Sleep -Seconds 20
-          if (-not $p.HasExited) { Stop-Process $p -Force; "Lumy is running"; exit 0 }
-          "Lumy exited with code $($p.ExitCode)"
-          $log = Join-Path $env:LOCALAPPDATA 'Lumy/crash.log'
-          if (Test-Path $log) { Get-Content $log }
-          Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $started } -ErrorAction SilentlyContinue |
-            Where-Object { $_.ProviderName -in '.NET Runtime', 'Application Error', 'Windows Error Reporting' } |
+          $p = Start-Process artifacts/Lumy-win-x64/Lumy.exe -ArgumentList '--self-test', "$env:RUNNER_TEMP\photos" -PassThru
+          if (-not $p.WaitForExit(120000)) { Stop-Process $p -Force; "Self-test did not finish in 2 minutes" }
+          $dir = Join-Path $env:LOCALAPPDATA 'Lumy'
+          if (Test-Path "$dir/self-test.txt") { Get-Content "$dir/self-test.txt" } else { "No self-test report" }
+          if (Test-Path "$dir/crash.log") { "--- crash.log ---"; Get-Content "$dir/crash.log" }
+          if ($p.HasExited -and $p.ExitCode -eq 0) { exit 0 }
+          Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -in '.NET Runtime', 'Application Error' } |
             Format-List TimeCreated, ProviderName, Message
           exit 1
 

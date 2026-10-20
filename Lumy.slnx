@@ -4,8 +4,10 @@
       <Platform Project="x64" />
     </Project>
     <Project Path="src/Lumy.Core/Lumy.Core.csproj" />
+    <Project Path="src/Lumy.Remote/Lumy.Remote.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Lumy.Core.Tests/Lumy.Core.Tests.csproj" />
+    <Project Path="tests/Lumy.Remote.Tests/Lumy.Remote.Tests.csproj" />
   </Folder>
 </Solution>

@@ -18,12 +18,13 @@ namespace Lumy.App;
 
 public sealed partial class MainWindow : Window
 {
-    private const uint ThumbnailRequestSize = 512;
-
     private readonly LibraryDatabase _database;
     private readonly AppSettings _settings;
     private readonly RatingService _ratings;
     private readonly LoupeImageCache _loupeCache;
+    private readonly ThumbnailService _thumbnails = new(ThumbnailService.DefaultFolder);
+    private readonly ThumbnailTracker _galleryThumbnails;
+    private readonly ThumbnailTracker _filmstripThumbnails;
     private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromMilliseconds(1600) };
     private readonly DispatcherTimer _flashTimer = new() { Interval = TimeSpan.FromMilliseconds(380) };
 
@@ -40,9 +41,11 @@ public sealed partial class MainWindow : Window
     private bool _zoomedIn;
     private Point _pointerInLoupe;
 
-    public MainWindow(string? folder)
+    public MainWindow(string? folder, bool selfTest = false)
     {
         InitializeComponent();
+        _galleryThumbnails = new ThumbnailTracker(_thumbnails);
+        _filmstripThumbnails = new ThumbnailTracker(_thumbnails);
 
         _database = new LibraryDatabase(LibraryDatabase.DefaultPath);
         _settings = new AppSettings(_database);
@@ -56,13 +59,30 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        AppWindow.Resize(new SizeInt32(1440, 920));
-        Closed += (_, _) => _database.Dispose();
+        RestoreWindowPlacement();
+        Closed += (_, _) =>
+        {
+            SaveSession();
+            _ = _remote?.StopAsync();
+            _database.Dispose();
+        };
 
         Gallery.ItemsSource = _visible;
+        SetUpViewer();
         SizeSlider.Value = _settings.ThumbnailSize;
+        RestoreSort();
+        RefreshRecentFolders();
         _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); Toast.Opacity = 0; };
         _flashTimer.Tick += (_, _) => { _flashTimer.Stop(); FlashBadge.Opacity = 0; };
+        Gallery.SelectionChanged += (_, _) => PushRemoteState();
+        if (_settings.RemoteEnabled)
+            _ = StartRemoteAsync(showErrors: false);
+
+        if (selfTest && folder is not null)
+        {
+            _ = RunSelfTestAsync(folder);
+            return;
+        }
 
         var start = folder ?? _settings.LastFolder;
         if (!string.IsNullOrEmpty(start) && Directory.Exists(start))
@@ -98,6 +118,10 @@ public sealed partial class MainWindow : Window
         var cancellation = _loading = new CancellationTokenSource();
 
         CloseLoupe();
+        if (InSwipe)
+            CloseSwipe();
+        if (InCompare)
+            CloseCompare();
         EmptyState.Visibility = Visibility.Collapsed;
         LoadingRing.IsActive = true;
         FolderTitle.Text = folder;
@@ -109,11 +133,20 @@ public sealed partial class MainWindow : Window
             if (cancellation.IsCancellationRequested)
                 return;
 
+            SaveLastPhoto();
             _folder = folder;
             _settings.LastFolder = folder;
+            _settings.AddRecentFolder(folder);
+            RefreshRecentFolders();
             _loupeCache.Clear();
+            _details.Clear();
+            _galleryThumbnails.ReleaseAll();
+            _filmstripThumbnails.ReleaseAll();
             _all = records.Select(r => new PhotoItem(r)).ToList();
+            _remoteRecords = _all.ToDictionary(p => p.Id, p => p.Record);
             ApplyFilter();
+            RestoreLastPhoto(folder);
+            _ = DetectSeriesAsync(_all);
         }
         catch (OperationCanceledException)
         {
@@ -161,6 +194,7 @@ public sealed partial class MainWindow : Window
         ApplyThumbnailSize();
         if (_visible.Count > 0)
             Gallery.SelectedIndex = 0;
+        PublishRemotePhotos();
     }
 
     private void FilterBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args) => ApplyFilter();
@@ -170,6 +204,9 @@ public sealed partial class MainWindow : Window
 
     private void SortBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        // Also fires from InitializeComponent, before the settings exist.
+        if (_settings is not null && !_restoringSort)
+            _settings.Sort = CurrentSort.ToString();
         if (_all.Count == 0)
             return;
 
@@ -180,8 +217,10 @@ public sealed partial class MainWindow : Window
 
     private void UpdateCounter()
     {
+        PushRemoteState();
         if (_all.Count == 0)
         {
+            UpdateFilterCounts(null, null, null, null);
             CounterText.Text = "";
             return;
         }
@@ -198,6 +237,7 @@ public sealed partial class MainWindow : Window
         }
 
         var unrated = _all.Count - likes - supers - rejected;
+        UpdateFilterCounts(likes, supers, rejected, unrated);
         CounterText.Text = $"Отобрано {likes + supers} из {_all.Count}  ·  ★ {supers}  ·  ♥ {likes}  ·  ✕ {rejected}  ·  без оценки {unrated}";
     }
 
@@ -205,13 +245,7 @@ public sealed partial class MainWindow : Window
 
     private void Gallery_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        if (args.Item is not PhotoItem item)
-            return;
-
-        if (args.InRecycleQueue)
-            item.ReleaseThumbnail();
-        else
-            _ = item.LoadThumbnailAsync(ThumbnailRequestSize);
+        _galleryThumbnails.OnContainerContentChanging(args);
     }
 
     private void Gallery_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -266,6 +300,7 @@ public sealed partial class MainWindow : Window
 
         Loupe.Visibility = Visibility.Collapsed;
         LoupeImage.Source = null;
+        ResetFilmstrip();
         if (_loupeIndex >= 0 && _loupeIndex < _visible.Count)
         {
             Gallery.SelectedIndex = _loupeIndex;
@@ -275,6 +310,7 @@ public sealed partial class MainWindow : Window
         if (AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen)
             AppWindow.SetPresenter(AppWindowPresenterKind.Default);
         Gallery.Focus(FocusState.Programmatic);
+        PushRemoteState();
     }
 
     private async void ShowInLoupe(int index)
@@ -288,6 +324,8 @@ public sealed partial class MainWindow : Window
 
         ResetZoom();
         UpdateLoupeInfo();
+        SyncFilmstrip(index);
+        LoadDetails(item);
 
         var pending = _loupeCache.GetAsync(item);
         _loupeCache.Prefetch(_visible, index);
@@ -295,10 +333,9 @@ public sealed partial class MainWindow : Window
         // Usually the neighbour was prefetched and is ready. If not, show the thumbnail at once and swap in the sharp image.
         if (!pending.IsCompleted)
         {
-            if (item.Thumbnail is null)
-                await item.LoadThumbnailAsync(ThumbnailRequestSize);
+            var placeholder = item.Thumbnail ?? await PhotoItem.LoadCachedThumbnailAsync(_thumbnails, item.Record);
             if (request == _loupeRequest && !pending.IsCompleted)
-                LoupeImage.Source = item.Thumbnail;
+                LoupeImage.Source = placeholder;
         }
 
         var bitmap = await pending;
@@ -311,12 +348,15 @@ public sealed partial class MainWindow : Window
         if (_loupeIndex < 0 || _loupeIndex >= _visible.Count)
             return;
 
+        PushRemoteState();
+
         var item = _visible[_loupeIndex];
         LoupeName.Text = item.FileName;
-        LoupeDetails.Text = item.Record.CapturedAt is { } taken ? $"{item.FormatLabel}  ·  {taken:dd.MM.yyyy HH:mm:ss}" : item.FormatLabel;
-        LoupePosition.Text = $"{_loupeIndex + 1} / {_visible.Count}";
-        LoupeTierIcon.Glyph = item.Tier == Tier.None ? "\uEB51" : item.TierGlyph; // empty heart when unrated
-        LoupeTierIcon.Foreground = item.TierBrush ?? (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"];
+        LoupeDetails.Text = DetailsLine(item);
+        LoupePosition.Text = item.SeriesSize > 1
+            ? $"серия {item.SeriesPosition}/{item.SeriesSize}  ·  {_loupeIndex + 1} / {_visible.Count}"
+            : $"{_loupeIndex + 1} / {_visible.Count}";
+        UpdateRatingButtons(item.Tier);
     }
 
     private void StepLoupe(int delta, bool unratedOnly = false)
@@ -333,14 +373,11 @@ public sealed partial class MainWindow : Window
 
     private void LoupeScroll_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // At zoom 1 the image exactly fits the window; zooming in scales from there.
-        LoupeImage.Width = e.NewSize.Width;
-        LoupeImage.Height = e.NewSize.Height;
+        // At zoom 1 the canvas exactly fills the space between the bars and the photo sits centred in it.
+        LoupeCanvas.Width = e.NewSize.Width;
+        LoupeCanvas.Height = e.NewSize.Height;
         ResetZoom();
     }
-
-    private void LoupeScroll_PointerMoved(object sender, PointerRoutedEventArgs e) =>
-        _pointerInLoupe = e.GetCurrentPoint(LoupeScroll).Position;
 
     private void LoupeScroll_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
@@ -389,6 +426,7 @@ public sealed partial class MainWindow : Window
     {
         var full = AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
         AppWindow.SetPresenter(full ? AppWindowPresenterKind.Default : AppWindowPresenterKind.FullScreen);
+        PushRemoteState();
     }
 
     // ---------- Rating ----------
@@ -406,14 +444,16 @@ public sealed partial class MainWindow : Window
         _ratings.Rate(targets, tier);
         UpdateCounter();
 
+        // Clearing a rating stays on the photo: it is a correction, not a decision.
+        var advance = _settings.AutoAdvance && tier != Tier.None;
         if (InLoupe)
         {
             Flash(tier);
             UpdateLoupeInfo();
-            if (_settings.AutoAdvance && _loupeIndex < _visible.Count - 1)
+            if (advance && _loupeIndex < _visible.Count - 1)
                 StepLoupe(+1);
         }
-        else if (_settings.AutoAdvance && targets.Count == 1 && Gallery.SelectedIndex < _visible.Count - 1)
+        else if (advance && targets.Count == 1 && Gallery.SelectedIndex < _visible.Count - 1)
         {
             Gallery.SelectedIndex++;
             Gallery.ScrollIntoView(Gallery.SelectedItem);
@@ -455,7 +495,14 @@ public sealed partial class MainWindow : Window
     {
         var ctrl = IsDown(VirtualKey.Control);
         var shift = IsDown(VirtualKey.Shift);
-        e.Handled = ctrl ? HandleCtrlKey(e.Key, shift) : HandleKey(e.Key, shift);
+        if (InTournament)
+            e.Handled = HandleTournamentKey(e.Key, ctrl);
+        else if (InSwipe)
+            e.Handled = HandleSwipeKey(e.Key, ctrl, shift);
+        else if (InCompare)
+            e.Handled = HandleCompareKey(e.Key, ctrl);
+        else
+            e.Handled = ctrl ? HandleCtrlKey(e.Key, shift) : HandleKey(e.Key, shift);
     }
 
     private bool HandleCtrlKey(VirtualKey key, bool shift)
@@ -463,6 +510,7 @@ public sealed partial class MainWindow : Window
         switch (key)
         {
             case VirtualKey.O: _ = PickFolderAsync(); return true;
+            case VirtualKey.C: _ = CopyPhotosAsync(CurrentPhotos(), pathsOnly: shift); return true;
             case VirtualKey.Z: UndoOrRedo(redo: shift); return true;
             case VirtualKey.Y: UndoOrRedo(redo: true); return true;
             case VirtualKey.Number0: SetFilter(TierFilter.All); return true;
@@ -487,6 +535,10 @@ public sealed partial class MainWindow : Window
             case (VirtualKey)191 when shift: ShowHelp(); return true; // ?
             case VirtualKey.F1: ShowHelp(); return true;
             case VirtualKey.F11: ToggleFullScreen(); return true;
+            case VirtualKey.S: StartSwipe(); return true;
+            case VirtualKey.C: StartCompare(); return true;
+            case VirtualKey.B: _ = SetUpTournamentAsync(); return true;
+            case VirtualKey.Delete: _ = DeletePhotosAsync(CurrentPhotos()); return true;
         }
 
         if (InLoupe)
@@ -498,6 +550,7 @@ public sealed partial class MainWindow : Window
                 case VirtualKey.Home: ShowInLoupe(0); return true;
                 case VirtualKey.End: ShowInLoupe(_visible.Count - 1); return true;
                 case VirtualKey.Z: _ = ToggleZoomAsync(); return true;
+                case VirtualKey.T: ToggleFilmstrip(); return true;
                 case VirtualKey.Escape or VirtualKey.Enter: CloseLoupe(); return true;
                 default: return false;
             }
@@ -539,10 +592,23 @@ public sealed partial class MainWindow : Window
             ("Ctrl + 0 / 1 / 2 / 3 / 4", "Все / Лайки / Суперлайки / Без оценки / Отклонённые"),
             ("Enter / Esc", "Открыть на весь экран / назад в галерею"),
             ("Z  или двойной клик", "Масштаб 100% и обратно"),
+            ("Колесо мыши", "Следующее / предыдущее фото; над лентой листает ленту"),
+            ("Ctrl + колесо, перетаскивание", "Зум и сдвиг увеличенного фото"),
+            ("T", "Показать или скрыть ленту в просмотре"),
+            ("Правый клик", "Копировать, показать в проводнике, открыть в другой программе"),
+            ("Ctrl+C / Ctrl+Shift+C", "Копировать фото / путь к файлу"),
+            ("Delete", "Удалить в корзину (вместе с RAW и .xmp)"),
+            ("S", "Режим свайпа по фото без оценки: → лайк, ↑ суперлайк, ← отказ, ↓ потом, Backspace назад"),
+            ("Shift + ← (в свайпе)", "Отклонить всю серию похожих кадров"),
+            ("C", "Сравнить выделенные фото или всю серию текущего фото"),
+            ("1–9 (в сравнении)", "Убрать фото из сравнения; F / R / X оценивают фото под мышью"),
+            ("Shift / Ctrl + клик в ленте", "Выбрать фото для сравнения, не меняя открытое; C — сравнить"),
+            ("B", "Турнир: выбрать лучшие N фото попарно (← → выбор, Backspace назад)"),
             ("F11", "Полноэкранный режим"),
             ("`", "Автопереход после оценки вкл/выкл"),
             ("Ctrl+O", "Открыть папку"),
             ("Ctrl + колесо", "Размер миниатюр"),
+            ("Кнопка «Телефон»", "Пульт: листать и оценивать с телефона по QR-коду"),
         ];
 
         var grid = new Grid { ColumnSpacing = 24, RowSpacing = 8 };
@@ -576,5 +642,10 @@ public sealed partial class MainWindow : Window
         Toast.Opacity = 1;
         _toastTimer.Stop();
         _toastTimer.Start();
+
+        // The phone shows the same message, so a hint like "select 2–9 photos" reaches whoever holds it.
+        _remoteMessage = text;
+        _remoteMessageId++;
+        PushRemoteState();
     }
 }

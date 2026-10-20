@@ -23,7 +23,7 @@ Every push builds a ready-to-run copy on GitHub Actions: open the latest
 
 To build locally: `dotnet run --project src/Lumy.App -p:Platform=x64`.
 
-## Keys (v0.1)
+## Keys
 
 | Key | Action |
 | --- | --- |
@@ -39,13 +39,34 @@ To build locally: `dotnet run --project src/Lumy.App -p:Platform=x64`.
 | Z or double-click | Zoom to 100% and back |
 | F11 | Full screen |
 | ` | Toggle moving to the next photo after rating |
+| S | Swipe mode over unrated photos: → like, ↑ super like, ← reject, ↓ later, Backspace back, Shift+← rejects the whole series |
+| C | Compare the selected photos (2–9), or every frame of the current photo's series |
+| 1–9 (compare) | Drop that photo from the comparison; F / R / X rate the photo under the mouse; L toggles synced zoom |
 | ? or F1 | Key reference |
+
+Photos shot within a few seconds of each other that look alike are grouped
+into a series (badge "3/8" on the tile), using capture time and a perceptual
+hash of the thumbnail.
 
 Ratings are also written to the `.xmp` sidecar of RAW files (Like = 4 stars,
 Super like = 5, Reject = −1), so Lightroom and Bridge see them.
 
+## Phone remote
+
+The **Телефон** button in the toolbar shows a QR code. Scan it with a phone on
+the same Wi-Fi and the phone becomes a remote: swipe the photo left/right to
+step through photos (in swipe mode: → like, ← reject, ↑ super like, ↓ later),
+tap ♥ ★ ✕ to rate, and open, zoom, undo or start swipe mode from the buttons.
+The phone shows the current photo and its rating.
+
+The remote is a small web server inside Lumy (port 8765, or the next free one),
+so nothing has to be installed on the phone. Every request must carry the
+secret code from the QR link; "Новый код" in the dialog unpairs old links.
+On first use Windows asks to allow Lumy through the firewall on private networks.
+
 ## Layout
 
 - `src/Lumy.Core` — folder scanning, library database, ratings, XMP. No UI, cross-platform, unit tested.
+- `src/Lumy.Remote` — the phone remote: web server, phone page, QR code. Cross-platform, unit tested.
 - `src/Lumy.App` — the WinUI 3 app.
-- `tests/Lumy.Core.Tests` — xUnit tests for the core (`dotnet test tests/Lumy.Core.Tests`).
+- `tests/Lumy.Core.Tests`, `tests/Lumy.Remote.Tests` — xUnit tests (`dotnet test tests/Lumy.Core.Tests`).

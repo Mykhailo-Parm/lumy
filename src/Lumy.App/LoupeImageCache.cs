@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Lumy.Core;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage;
@@ -30,11 +29,19 @@ public sealed class LoupeImageCache(int decodeWidth)
     /// <summary>Decodes the neighbours of <paramref name="index"/> and forgets bitmaps that are far away.</summary>
     public void Prefetch(IReadOnlyList<PhotoItem> items, int index)
     {
+        var from = Math.Max(0, index - Radius);
+        var to = Math.Min(items.Count - 1, index + Radius);
+        Retain(Enumerable.Range(from, Math.Max(0, to - from + 1)).Select(i => items[i]));
+    }
+
+    /// <summary>Decodes exactly these photos and forgets every other bitmap.</summary>
+    public void Retain(IEnumerable<PhotoItem> items)
+    {
         var keep = new HashSet<long>();
-        for (var i = Math.Max(0, index - Radius); i <= Math.Min(items.Count - 1, index + Radius); i++)
+        foreach (var item in items)
         {
-            keep.Add(items[i].Id);
-            _ = GetAsync(items[i]);
+            keep.Add(item.Id);
+            _ = GetAsync(item);
         }
 
         foreach (var id in _screen.Keys.Where(id => !keep.Contains(id)).ToList())
@@ -46,17 +53,18 @@ public sealed class LoupeImageCache(int decodeWidth)
     /// <summary>The image at its native resolution, for checking focus at 100%. Not cached: only one is needed at a time.</summary>
     public static Task<BitmapImage?> LoadFullResolutionAsync(PhotoItem item) => LoadAsync(item.Path, 0);
 
-    private static async Task<BitmapImage?> LoadAsync(string path, int width)
+    /// <summary>Decodes a photo at the given width in physical pixels (0 = native). Used directly by compare, which sizes per cell.</summary>
+    public static async Task<BitmapImage?> LoadAsync(string path, int width)
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
             var bitmap = new BitmapImage();
 
             // RAW files are shown through their embedded preview, which Windows hands out quickly;
             // decoding the sensor data is not needed for picking shots.
             if (PhotoFormats.IsRaw(path))
             {
+                var file = await StorageFile.GetFileFromPathAsync(path);
                 using var preview = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, (uint)(width == 0 ? 8192 : width), ThumbnailOptions.ResizeThumbnail);
                 if (preview is null)
                     return null;
@@ -70,12 +78,13 @@ public sealed class LoupeImageCache(int decodeWidth)
                 bitmap.DecodePixelWidth = width;
             }
 
-            using var stream = await file.OpenReadAsync();
+            using var stream = File.OpenRead(path).AsRandomAccessStream();
             await bitmap.SetSourceAsync(stream);
             return bitmap;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or COMException)
+        catch (Exception)
         {
+            // Unreadable or unsupported files show their thumbnail instead; never a reason to crash.
             return null;
         }
     }

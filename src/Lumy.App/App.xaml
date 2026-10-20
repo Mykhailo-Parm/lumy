@@ -13,6 +13,18 @@
             <SolidColorBrush x:Key="SuperLikeBrush" Color="#FFFFC23D" />
             <SolidColorBrush x:Key="RejectBrush" Color="#FF9AA0A6" />
             <SolidColorBrush x:Key="LoupeBackgroundBrush" Color="#FF0B0B0C" />
+
+            <!-- Filmstrip tile width; the viewer centres the current photo with it, so keep the two in step. -->
+            <x:Double x:Key="FilmstripItemWidth">112</x:Double>
+
+            <Style x:Key="LoupeIconButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="36" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="18" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
