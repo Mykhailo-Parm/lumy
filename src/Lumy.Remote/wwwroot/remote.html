@@ -8,18 +8,20 @@
 <title>Lumy · пульт</title>
 <style>
   :root {
-    --bg: #0b0b0c; --panel: #17171a; --line: #2a2a2f; --text: #f2f2f4; --muted: #9a9aa3;
-    --like: #ff5a7a; --super: #ffc23d; --reject: #9aa0a6; --ok: #3ccf7a; --warn: #e5a50a;
+    --bg: #0b0b0c; --panel: #17171a; --panel2: #202024; --line: #2a2a2f; --text: #f2f2f4; --muted: #9a9aa3;
+    --like: #ff5a7a; --super: #ffc23d; --reject: #9aa0a6; --ok: #3ccf7a; --warn: #e5a50a; --accent: #4c9bff;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 15px/1.35 -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
   body { display: flex; flex-direction: column; padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom); user-select: none; }
-  header { display: flex; align-items: center; gap: 8px; padding: 10px 2px; }
+  header { display: flex; align-items: center; gap: 8px; padding: 8px 2px; min-height: 48px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
   .dot.on { background: var(--ok); }
-  .brand { font-weight: 600; }
-  #mode { color: var(--muted); margin-left: auto; }
+  #folder { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  #mode { color: var(--muted); margin-left: auto; white-space: nowrap; }
+  .icon { flex: none; width: 40px; height: 40px; padding: 0; font-size: 18px; border-radius: 12px; }
+
   #stage { position: relative; flex: 1; min-height: 0; border-radius: 16px; background: var(--panel);
     overflow: hidden; touch-action: none; display: flex; align-items: center; justify-content: center; }
   #photo { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .16s ease-out, opacity .16s; pointer-events: none; }
@@ -27,30 +29,78 @@
   #hint { position: absolute; font-size: 64px; opacity: 0; pointer-events: none; text-shadow: 0 2px 12px #000; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
     padding: 24px; color: var(--muted); }
-  .info { display: flex; gap: 8px; align-items: baseline; padding: 10px 2px 4px; min-height: 40px; }
+
+  /* Several photos at once: the duel, the comparison, the winners. */
+  #multi { position: absolute; inset: 0; display: grid; gap: 6px; padding: 6px; touch-action: manipulation; }
+  #multi.duel { grid-template-rows: 1fr 1fr; }
+  @media (orientation: landscape) { #multi.duel { grid-template-rows: none; grid-template-columns: 1fr 1fr; } }
+  .tile { position: relative; border-radius: 10px; overflow: hidden; background: #000; border: 2px solid transparent; min-height: 0; }
+  .tile img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+  .tile.focus { border-color: var(--accent); }
+  .tile .label { position: absolute; left: 6px; top: 6px; background: #000a; border-radius: 8px; padding: 2px 8px; font-size: 13px; font-weight: 600; }
+  .tile .label.gold { background: var(--super); color: #000; }
+  .tile .badge { position: absolute; right: 6px; top: 6px; font-size: 16px; text-shadow: 0 1px 4px #000; }
+  .tile:active { transform: scale(.98); }
+
+  .info { display: flex; gap: 8px; align-items: baseline; padding: 8px 2px 2px; min-height: 34px; }
   #name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tier { font-size: 18px; }
   #pos { color: var(--muted); margin-left: auto; white-space: nowrap; }
-  #detail { color: var(--muted); padding: 0 2px 8px; min-height: 22px; font-size: 13px; }
-  .row { display: grid; gap: 10px; margin-bottom: 10px; }
-  .rate { grid-template-columns: repeat(3, 1fr); }
-  .tools { grid-template-columns: repeat(4, 1fr); }
+  #detail { color: var(--muted); padding: 0 2px 8px; min-height: 22px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .row { display: grid; gap: 8px; margin-bottom: 8px; grid-auto-flow: column; grid-auto-columns: 1fr; }
+  .row[hidden], button[hidden] { display: none; }
   button { appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--text);
     border-radius: 14px; padding: 12px 6px; font: inherit; font-size: 14px; touch-action: manipulation; }
   button:active { transform: scale(.96); background: #222227; }
-  .big { font-size: 26px; padding: 14px 6px; }
+  button:disabled { opacity: .4; }
+  .big { font-size: 26px; padding: 12px 6px; }
   .like { color: var(--like); } .super { color: var(--super); } .reject { color: var(--reject); }
-  button[hidden] { display: none; }
-  .tip { color: var(--muted); font-size: 12px; text-align: center; padding-bottom: 6px; }
+  .tip { color: var(--muted); font-size: 12px; text-align: center; padding-bottom: 6px; min-height: 18px; }
+
+  /* Sheets: the menu and the photo grid slide over everything. */
+  .sheet { position: fixed; inset: 0; background: var(--bg); z-index: 10; display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom); transform: translateY(100%); transition: transform .2s ease-out; }
+  .sheet.open { transform: none; }
+  .sheet header { gap: 10px; }
+  .sheet h2 { font-size: 17px; margin: 0; }
+  .sheet .body { overflow-y: auto; flex: 1; padding-bottom: 16px; -webkit-overflow-scrolling: touch; }
+  .sheet h3 { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 18px 2px 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 9px 14px; border-radius: 999px; }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .list button { display: block; width: 100%; text-align: left; margin-bottom: 6px; padding: 12px 14px; }
+  .list button.on { border-color: var(--accent); }
+  .danger { color: #ff7b7b; }
+
+  #grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  @media (min-width: 600px) { #grid { grid-template-columns: repeat(5, 1fr); } }
+  .cell { position: relative; aspect-ratio: 1; background: var(--panel); border-radius: 6px; overflow: hidden; border: 2px solid transparent; }
+  .cell img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  .cell .badge { position: absolute; right: 4px; top: 2px; font-size: 14px; text-shadow: 0 1px 4px #000; }
+  .cell.current { border-color: var(--accent); }
+  .cell.picked::after { content: "✓"; position: absolute; left: 4px; top: 4px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  #gridBar { padding-top: 8px; }
+
+  #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%);
+    background: #2b2b31; color: var(--text); padding: 10px 16px; border-radius: 12px; max-width: 90vw; text-align: center;
+    font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; box-shadow: 0 6px 24px #0008; }
+  #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
   <header>
-    <span class="dot" id="dot"></span><span class="brand">Lumy</span><span id="mode">подключаюсь…</span>
+    <span class="dot" id="dot"></span>
+    <span id="folder">Lumy</span>
+    <span id="mode">подключаюсь…</span>
+    <button class="icon" id="gridBtn" aria-label="Все фото">▦</button>
+    <button class="icon" id="menuBtn" aria-label="Меню">☰</button>
   </header>
 
   <div id="stage">
     <img id="photo" alt="">
+    <div id="multi" hidden></div>
     <div id="hint"></div>
     <div id="empty">Откройте папку с фото в Lumy на компьютере</div>
   </div>
@@ -58,82 +108,239 @@
   <div class="info"><span id="tier"></span><span id="name"></span><span id="pos"></span></div>
   <div id="detail"></div>
 
-  <div class="row rate">
+  <!-- Each screen shows the rows it needs; render() decides. -->
+  <div class="row" id="duelRow" hidden>
+    <button class="big" data-cmd="pick" data-arg="0" id="leftBtn">◀ Левое</button>
+    <button class="big" data-cmd="pick" data-arg="1" id="rightBtn">Правое ▶</button>
+  </div>
+  <div class="row" id="rateRow">
     <button class="big reject" data-cmd="reject" aria-label="Отказ">✕</button>
     <button class="big super" data-cmd="super" aria-label="Суперлайк">★</button>
     <button class="big like" data-cmd="like" aria-label="Лайк">♥</button>
   </div>
-  <div class="row tools">
-    <button data-cmd="undo">↶ Назад</button>
-    <button id="openBtn" data-cmd="open">Открыть</button>
-    <button id="swipeBtn" data-cmd="swipe">Свайп</button>
-    <button id="zoomBtn" data-cmd="zoom">100%</button>
+  <div class="row" id="navRow">
+    <button data-cmd="prev">‹ Пред.</button>
+    <button data-cmd="next-unrated">Без оценки ›</button>
+    <button data-cmd="next">След. ›</button>
   </div>
-  <div class="tip" id="tip">Свайп по фото: ← → листать</div>
+  <div class="row" id="winnersRow" hidden>
+    <button data-cmd="winners-super">★ Всем</button>
+    <button data-cmd="winners-show">В галерее</button>
+    <button data-cmd="winners-compare">Сравнить</button>
+  </div>
+  <div class="row" id="toolsRow">
+    <button data-cmd="undo">↶ Отменить</button>
+    <button id="openBtn" data-cmd="open">Открыть</button>
+    <button id="removeBtn" data-cmd="remove" hidden>Убрать</button>
+    <button id="skipBtn" data-cmd="skip" hidden>↓ Потом</button>
+    <button id="zoomBtn" data-cmd="zoom" hidden>100%</button>
+    <button id="backBtn" data-cmd="back">Выйти</button>
+  </div>
+  <div class="tip" id="tip"></div>
+
+  <section class="sheet" id="menu">
+    <header><h2>Lumy</h2><button class="icon" style="margin-left:auto" data-close="menu">✕</button></header>
+    <div class="body">
+      <h3>Папки</h3>
+      <div class="list" id="folders"></div>
+
+      <h3>Фильтр</h3>
+      <div class="chips" id="filters"></div>
+
+      <h3>Сортировка</h3>
+      <div class="chips" id="sorts"></div>
+
+      <h3>Режимы</h3>
+      <div class="list">
+        <button data-cmd="swipe" data-close="menu">Свайп: оценивать по одному</button>
+        <button data-cmd="compare" data-close="menu">Сравнить серию или выделенные</button>
+        <button id="openGrid" data-close="menu">Все фото сеткой…</button>
+      </div>
+
+      <h3>Турнир</h3>
+      <div class="chips" id="pools"></div>
+      <div class="chips" id="sizes" style="margin-top:8px"></div>
+      <div class="list" style="margin-top:8px"><button id="startTournament" data-close="menu">Начать турнир</button></div>
+
+      <h3>Экран</h3>
+      <div class="chips">
+        <button class="chip" id="autoChip" data-cmd="auto-advance">Автопереход</button>
+        <button class="chip" id="filmChip" data-cmd="filmstrip">Лента</button>
+        <button class="chip" id="fullChip" data-cmd="fullscreen">Полный экран</button>
+        <button class="chip" data-cmd="redo">↷ Вернуть</button>
+      </div>
+
+      <h3>Фото</h3>
+      <div class="list"><button class="danger" id="deleteCurrent" data-close="menu">Удалить открытое фото в корзину</button></div>
+    </div>
+  </section>
+
+  <section class="sheet" id="browser">
+    <header>
+      <h2 id="gridTitle">Все фото</h2>
+      <button id="selectBtn" style="margin-left:auto;padding:9px 12px">Выбрать</button>
+      <button class="icon" data-close="browser">✕</button>
+    </header>
+    <div class="body"><div id="grid"></div></div>
+    <div class="row" id="gridBar" hidden>
+      <button id="gridCompare">Сравнить</button>
+      <button id="gridTournament">Турнир</button>
+      <button class="danger" id="gridDelete">В корзину</button>
+    </div>
+  </section>
+
+  <div id="toast"></div>
 
 <script>
 (() => {
   const token = new URLSearchParams(location.search).get('t') || '';
+  const q = `t=${encodeURIComponent(token)}`;
   const $ = id => document.getElementById(id);
   const glyph = { like: '♥', superLike: '★', rejected: '✕', none: '' };
   const tierClass = { like: 'like', superLike: 'super', rejected: 'reject', none: '' };
-  const modeName = { empty: 'нет фото', gallery: 'галерея', loupe: 'просмотр', swipe: 'свайп', 'swipe-done': 'свайп завершён', compare: 'сравнение' };
-  let socket, state = { mode: 'empty' }, retry = 500, shownId = null;
+  const modeName = { empty: 'нет фото', gallery: 'галерея', loupe: 'просмотр', swipe: 'свайп', 'swipe-done': 'свайп завершён',
+    compare: 'сравнение', tournament: 'турнир', 'tournament-done': 'итоги турнира' };
+  const filters = [['All', 'Все', c => c.all], ['LikedOrBetter', 'Лайки', c => c.liked + c.superLiked], ['SuperLikes', 'Суперлайки', c => c.superLiked],
+    ['Unrated', 'Без оценки', c => c.unrated], ['Rejected', 'Отклонённые', c => c.rejected]];
+  const sorts = [['CaptureTime', 'По времени съёмки'], ['Name', 'По имени']];
+  let socket, state = { mode: 'empty', photos: [], folders: [], counts: {} }, retry = 500, shownId = null, multiKey = '';
+  let lastMessage = 0, pool = 'likes', size = 10;
+  let list = { version: -1, photos: [] }, picking = false; const picked = new Set();
+
+  // ---------- Connection ----------
 
   function connect() {
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    socket = new WebSocket(`${scheme}://${location.host}/ws?t=${encodeURIComponent(token)}`);
+    socket = new WebSocket(`${scheme}://${location.host}/ws?${q}`);
     socket.onopen = () => { retry = 500; $('dot').classList.add('on'); };
     socket.onmessage = e => { try { render(JSON.parse(e.data)); } catch { } };
     socket.onclose = () => {
-      $('dot').classList.remove('on'); $('mode').textContent = 'нет связи, переподключаюсь…';
+      $('dot').classList.remove('on'); $('mode').textContent = 'нет связи…';
       setTimeout(connect, retry); retry = Math.min(retry * 2, 5000);
     };
   }
 
-  function send(cmd) {
+  function send(cmd, arg) {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ cmd }));
+      socket.send(JSON.stringify(arg == null ? { cmd } : { cmd, arg: String(arg) }));
       if (navigator.vibrate) navigator.vibrate(12);
+    } else {
+      toast('Нет связи с компьютером');
     }
   }
 
-  function render(s) {
-    state = s;
-    const swipe = s.mode === 'swipe';
-    $('mode').textContent = modeName[s.mode] || s.mode;
-    $('empty').style.display = s.photoId == null ? 'flex' : 'none';
-    $('empty').textContent = s.mode === 'swipe-done'
-      ? `Готово: ♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}`
-      : s.mode === 'compare' ? 'Сейчас на компьютере сравнение, управляйте им мышью' : 'Откройте папку с фото в Lumy на компьютере';
-    $('name').textContent = s.fileName || '';
-    $('pos').textContent = s.total ? `${s.position} / ${s.total}` : '';
-    $('tier').textContent = glyph[s.tier] || '';
-    $('tier').className = tierClass[s.tier] || '';
-    $('detail').textContent = swipe ? `♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}${s.detail ? ' · ' + s.detail : ''}` : (s.detail || '');
-    $('openBtn').textContent = s.mode === 'gallery' ? 'Открыть' : 'Выйти';
-    $('openBtn').dataset.cmd = s.mode === 'gallery' ? 'open' : 'back';
-    $('swipeBtn').hidden = swipe;
-    $('zoomBtn').hidden = s.mode !== 'loupe';
-    $('tip').textContent = swipe ? 'Свайп по фото: → лайк · ↑ суперлайк · ← отказ · ↓ потом' : 'Свайп по фото: ← → листать';
+  // ---------- Main screen ----------
 
-    if (s.photoId !== shownId) {
+  function render(s) {
+    const prev = state;
+    state = s;
+    const m = s.mode, swipe = m === 'swipe', duel = m === 'tournament', done = m === 'tournament-done', compare = m === 'compare';
+    const multi = duel || done || compare;
+    $('mode').textContent = modeName[m] || m;
+    $('folder').textContent = s.folder || 'Lumy';
+
+    $('empty').style.display = (s.photoId == null && !(multi && s.photos.length)) ? 'flex' : 'none';
+    $('empty').textContent = m === 'swipe-done' ? `Готово: ♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}`
+      : m === 'gallery' && !s.total ? 'В этом фильтре нет фото. Откройте меню ☰, чтобы выбрать другой'
+      : !s.folder ? 'Откройте папку: меню ☰ → Папки' : 'Нет фото';
+    $('photo').style.display = multi ? 'none' : '';
+    $('multi').hidden = !multi;
+    if (multi) renderMulti(s); else multiKey = '';
+
+    const focused = compare && s.focus >= 0 ? s.photos[s.focus] : null;
+    $('name').textContent = focused ? focused.fileName : multi ? '' : (s.fileName || '');
+    $('tier').textContent = glyph[(focused || s).tier] || '';
+    $('tier').className = tierClass[(focused || s).tier] || '';
+    $('pos').textContent = compare ? `${s.photos.length} фото` : done ? `топ ${s.photos.length}` : duel ? `дуэль ${s.position} из ~${s.total}` : s.total ? `${s.position || '–'} / ${s.total}` : '';
+    $('detail').textContent = swipe ? `♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}${s.detail ? ' · ' + s.detail : ''}` : (s.detail || '');
+
+    $('duelRow').hidden = !duel;
+    $('winnersRow').hidden = !done;
+    $('rateRow').hidden = duel || done || m === 'swipe-done' || m === 'empty';
+    $('rateRow').querySelectorAll('button').forEach(b => b.disabled = compare && !focused);
+    $('navRow').hidden = !(m === 'gallery' || m === 'loupe');
+    const open = m === 'gallery' || (compare && focused);
+    $('openBtn').hidden = !open;
+    $('removeBtn').hidden = !(compare && focused && s.photos.length > 1);
+    $('skipBtn').hidden = !swipe;
+    $('zoomBtn').hidden = m !== 'loupe';
+    $('backBtn').hidden = m === 'gallery' || m === 'empty';
+    $('backBtn').textContent = m === 'loupe' ? 'К сетке' : 'Выйти';
+    $('tip').textContent = swipe ? 'По фото: → лайк · ↑ суперлайк · ← отказ · ↓ потом'
+      : duel ? 'Нажмите на фото, которое лучше' : compare ? (focused ? 'Оценка применяется к выбранному фото' : 'Нажмите на фото, чтобы выбрать его')
+      : done ? 'Нажмите на фото, чтобы открыть его на компьютере' : (m === 'gallery' || m === 'loupe') ? 'По фото: ← → листать' : '';
+
+    if (!multi && s.photoId !== shownId) {
       shownId = s.photoId;
       const img = $('photo');
       img.classList.add('dragging');
       img.style.transform = ''; img.style.opacity = '1';
-      if (s.photoId != null) img.src = `/preview/${s.photoId}?t=${encodeURIComponent(token)}`;
-      else img.removeAttribute('src');
+      if (s.photoId != null) img.src = `/preview/${s.photoId}?${q}`; else img.removeAttribute('src');
       requestAnimationFrame(() => img.classList.remove('dragging'));
     }
+    if (multi) shownId = null;
+
+    if (s.message && s.messageId !== lastMessage && prev.messageId !== undefined) toast(s.message);
+    lastMessage = s.messageId;
+    renderMenu(s);
+    if ($('browser').classList.contains('open')) refreshGrid();
   }
 
-  document.querySelectorAll('button[data-cmd]').forEach(b => b.addEventListener('click', () => send(b.dataset.cmd)));
+  function renderMulti(s) {
+    const box = $('multi'), duel = s.mode === 'tournament', done = s.mode === 'tournament-done';
+    box.className = duel ? 'duel' : '';
+    const n = s.photos.length;
+    if (!duel) {
+      const cols = n <= 1 ? 1 : n <= 4 ? 2 : 3;
+      box.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      box.style.gridAutoRows = `minmax(0, 1fr)`;
+    } else {
+      box.style.gridTemplateColumns = ''; box.style.gridAutoRows = '';
+    }
 
-  // Gestures on the photo: in swipe mode they decide, elsewhere they step through photos.
+    // Rebuild only when the photos change, so the images do not flicker on every rating.
+    const key = s.mode + ':' + s.photos.map(p => p.id).join(',');
+    if (key !== multiKey) {
+      multiKey = key;
+      box.innerHTML = '';
+      s.photos.forEach((p, i) => {
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.innerHTML = `<img alt="" src="/${duel ? 'preview' : 'thumb'}/${p.id}?${q}"><span class="badge"></span>`
+          + (p.label ? `<span class="label${done && i === 0 ? ' gold' : ''}">${p.label}</span>` : '');
+        tile.addEventListener('click', () => {
+          if (duel) send('pick', i);
+          else if (done) send('goto', p.id);
+          else send('pick', i);
+        });
+        box.appendChild(tile);
+      });
+    }
+
+    [...box.children].forEach((tile, i) => {
+      const p = s.photos[i];
+      tile.classList.toggle('focus', s.mode === 'compare' && i === s.focus);
+      const badge = tile.querySelector('.badge');
+      badge.textContent = glyph[p.tier] || '';
+      badge.className = 'badge ' + (tierClass[p.tier] || '');
+    });
+  }
+
+  document.querySelectorAll('button[data-cmd]').forEach(b => b.addEventListener('click', () => {
+    const cmd = b.dataset.cmd;
+    if (cmd === 'back' && state.mode === 'tournament' && !confirm('Выйти из турнира? Выборы не сохранятся.')) return;
+    if (cmd === 'remove' || cmd === 'pick' && b.dataset.arg == null) return send(cmd, state.focus);
+    send(cmd, b.dataset.arg);
+  }));
+
+  // ---------- Gestures on the photo ----------
+
   const stage = $('stage'), img = $('photo'), hint = $('hint');
   let start = null;
-  stage.addEventListener('pointerdown', e => { start = { x: e.clientX, y: e.clientY, t: Date.now() }; img.classList.add('dragging'); stage.setPointerCapture(e.pointerId); });
+  stage.addEventListener('pointerdown', e => {
+    if (!$('multi').hidden) return;
+    start = { x: e.clientX, y: e.clientY }; img.classList.add('dragging'); stage.setPointerCapture(e.pointerId);
+  });
   stage.addEventListener('pointermove', e => {
     if (!start) return;
     const dx = e.clientX - start.x, dy = e.clientY - start.y;
@@ -154,6 +361,7 @@
       if (state.mode !== 'swipe') setTimeout(() => { img.style.transform = ''; }, 120);
     } else {
       img.style.transform = '';
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && state.mode === 'gallery') send('open');
     }
   };
   stage.addEventListener('pointerup', end);
@@ -170,6 +378,158 @@
     }
     if (!swipe) return null;
     return y < 0 ? { cmd: 'super', icon: '★', strength: -y } : { cmd: 'skip', icon: '↓', strength: y };
+  }
+
+  // ---------- Menu ----------
+
+  function chip(text, on, onClick) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (on ? ' on' : '');
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function renderMenu(s) {
+    const folders = $('folders');
+    folders.innerHTML = '';
+    if (!s.folders.length) folders.innerHTML = '<div class="tip" style="text-align:left">Папки, открытые на компьютере, появятся здесь</div>';
+    s.folders.forEach((name, i) => {
+      const b = document.createElement('button');
+      b.textContent = (i === 0 && name === s.folder ? '● ' : '') + name;
+      b.className = i === 0 && name === s.folder ? 'on' : '';
+      b.addEventListener('click', () => { send('folder', i); close('menu'); });
+      folders.appendChild(b);
+    });
+
+    const f = $('filters'); f.innerHTML = '';
+    filters.forEach(([tag, text, count]) => f.appendChild(chip(`${text} ${s.counts.all != null ? count(s.counts) : ''}`, s.filter === tag, () => send('filter', tag))));
+    const so = $('sorts'); so.innerHTML = '';
+    sorts.forEach(([tag, text]) => so.appendChild(chip(text, s.sort === tag, () => send('sort', tag))));
+
+    const likes = (s.counts.liked || 0) + (s.counts.superLiked || 0);
+    const p = $('pools'); p.innerHTML = '';
+    p.appendChild(chip(`Из лайков (${likes})`, pool === 'likes', () => { pool = 'likes'; renderMenu(state); }));
+    p.appendChild(chip(`Из показанных (${s.mode === 'gallery' || s.mode === 'loupe' ? s.total : s.counts.all || 0})`, pool === 'shown', () => { pool = 'shown'; renderMenu(state); }));
+    const z = $('sizes'); z.innerHTML = '';
+    [1, 5, 10, 20].forEach(n => z.appendChild(chip(n === 1 ? 'Лучшее 1' : `Топ ${n}`, size === n, () => { size = n; renderMenu(state); })));
+
+    $('autoChip').classList.toggle('on', !!s.autoAdvance);
+    $('filmChip').classList.toggle('on', !!s.filmstripVisible);
+    $('filmChip').hidden = s.mode !== 'loupe';
+    $('fullChip').classList.toggle('on', !!s.fullScreen);
+    $('deleteCurrent').hidden = !(s.mode === 'gallery' || s.mode === 'loupe') || s.photoId == null;
+  }
+
+  $('startTournament').addEventListener('click', () => send('tournament', `${pool}:${size}`));
+  $('deleteCurrent').addEventListener('click', () => {
+    if (confirm(`Удалить ${state.fileName} в корзину Windows? Вместе с RAW и .xmp, если они есть.`)) send('delete', state.photoId);
+  });
+
+  function open(id) { $(id).classList.add('open'); if (id === 'browser') refreshGrid(true); }
+  function close(id) { $(id).classList.remove('open'); if (id === 'browser') setPicking(false); }
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => close(b.dataset.close)));
+  $('menuBtn').addEventListener('click', () => open('menu'));
+  $('gridBtn').addEventListener('click', () => open('browser'));
+  $('openGrid').addEventListener('click', () => open('browser'));
+
+  // ---------- All photos ----------
+
+  async function refreshGrid(scroll) {
+    if (list.version !== state.listVersion) {
+      try {
+        const r = await fetch(`/photos?${q}`, { cache: 'no-store' });
+        list = await r.json();
+        buildGrid();
+      } catch { return; }
+    }
+    markGrid(scroll);
+  }
+
+  function buildGrid() {
+    const grid = $('grid');
+    grid.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    for (const p of list.photos) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.id = p.id;
+      cell.innerHTML = `<img loading="lazy" alt="" src="/thumb/${p.id}?${q}"><span class="badge ${tierClass[p.tier] || ''}">${glyph[p.tier] || ''}</span>`;
+      fragment.appendChild(cell);
+    }
+    grid.appendChild(fragment);
+    $('gridTitle').textContent = `Все фото · ${list.photos.length}`;
+    for (const id of [...picked]) if (!list.photos.some(p => p.id === id)) picked.delete(id);
+  }
+
+  function markGrid(scroll) {
+    let current = null;
+    for (const cell of $('grid').children) {
+      const id = Number(cell.dataset.id);
+      const is = id === state.photoId;
+      cell.classList.toggle('current', is);
+      cell.classList.toggle('picked', picked.has(id));
+      if (is) {
+        current = cell;
+        const badge = cell.querySelector('.badge');
+        badge.textContent = glyph[state.tier] || ''; badge.className = 'badge ' + (tierClass[state.tier] || '');
+      }
+    }
+    if (scroll && current) current.scrollIntoView({ block: 'center' });
+    updateGridBar();
+  }
+
+  $('grid').addEventListener('click', e => {
+    const cell = e.target.closest('.cell');
+    if (!cell) return;
+    const id = Number(cell.dataset.id);
+    if (picking) {
+      picked.has(id) ? picked.delete(id) : picked.add(id);
+      cell.classList.toggle('picked', picked.has(id));
+      updateGridBar();
+    } else {
+      send('goto', id);
+      if (state.mode === 'gallery') send('open');
+      close('browser');
+    }
+  });
+
+  function setPicking(on) {
+    picking = on;
+    if (!on) picked.clear();
+    $('selectBtn').textContent = on ? 'Готово' : 'Выбрать';
+    markGrid(false);
+  }
+
+  function updateGridBar() {
+    $('gridBar').hidden = !picking;
+    const n = picked.size;
+    $('gridCompare').disabled = n < 2 || n > 9;
+    $('gridTournament').disabled = n < 2;
+    $('gridDelete').disabled = n < 1;
+    $('gridCompare').textContent = `Сравнить${n ? ' ' + n : ''}`;
+    $('gridTournament').textContent = `Турнир${n ? ' из ' + n : ''}`;
+    if (picking) $('gridTitle').textContent = n ? `Выбрано ${n}` : 'Выберите фото';
+    else $('gridTitle').textContent = `Все фото · ${list.photos.length}`;
+  }
+
+  $('selectBtn').addEventListener('click', () => setPicking(!picking));
+  const ids = () => [...picked].join(',');
+  $('gridCompare').addEventListener('click', () => { send('compare', ids()); close('browser'); });
+  $('gridTournament').addEventListener('click', () => {
+    send('tournament', `${ids()}:${Math.min(size, Math.max(1, picked.size - 1))}`); close('browser');
+  });
+  $('gridDelete').addEventListener('click', () => {
+    if (confirm(`Удалить ${picked.size} фото в корзину Windows? Вместе с RAW и .xmp, если они есть.`)) { send('delete', ids()); setPicking(false); }
+  });
+
+  // ---------- Messages ----------
+
+  let toastTimer;
+  function toast(text) {
+    const t = $('toast');
+    t.textContent = text; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
   }
 
   connect();

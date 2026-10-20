@@ -34,12 +34,23 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <Button Grid.Column="0" Click="OpenFolder_Click" ToolTipService.ToolTip="Открыть папку (Ctrl+O)">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon Glyph="&#xE838;" FontSize="16" />
-                    <TextBlock Text="Открыть папку" />
-                </StackPanel>
-            </Button>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                <SplitButton x:Name="OpenFolderButton" Click="OpenFolderButton_Click" ToolTipService.ToolTip="Открыть папку (Ctrl+O); стрелка — недавние папки">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE838;" FontSize="16" />
+                        <TextBlock Text="Открыть папку" />
+                    </StackPanel>
+                    <SplitButton.Flyout>
+                        <MenuFlyout x:Name="RecentFoldersMenu" Placement="BottomEdgeAlignedLeft" />
+                    </SplitButton.Flyout>
+                </SplitButton>
+                <Button Click="Tournament_Click" ToolTipService.ToolTip="Турнир: выбрать лучшие N фото попарно (B)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE7C1;" FontSize="16" />
+                        <TextBlock Text="Турнир" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
 
             <SelectorBar x:Name="FilterBar" Grid.Column="1" SelectionChanged="FilterBar_SelectionChanged">
                 <SelectorBarItem Text="Все" Tag="All" IsSelected="True" ToolTipService.ToolTip="Ctrl+0" />
@@ -202,9 +213,8 @@
                     x:Name="Filmstrip"
                     Height="96"
                     Padding="8,6"
-                    SelectionMode="Single"
-                    IsItemClickEnabled="True"
-                    ItemClick="Filmstrip_ItemClick"
+                    SelectionMode="Extended"
+                    SelectionChanged="Filmstrip_SelectionChanged"
                     ContainerContentChanging="Filmstrip_ContainerContentChanging"
                     ContextRequested="Filmstrip_ContextRequested"
                     ScrollViewer.HorizontalScrollMode="Enabled"
@@ -233,6 +243,14 @@
                                         Margin="3" Padding="3" CornerRadius="8" Background="#99000000">
                                     <FontIcon Glyph="{x:Bind TierGlyph, Mode=OneWay}" FontSize="10" Foreground="{x:Bind TierBrush, Mode=OneWay}" />
                                 </Border>
+                                <!-- Picked for comparing (Ctrl/Shift + click) -->
+                                <Border Visibility="{x:Bind PickedVisibility, Mode=OneWay}" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                        Margin="3" Width="18" Height="18" CornerRadius="9" Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                    <FontIcon Glyph="&#xE73E;" FontSize="10" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                                </Border>
+                                <!-- The photo open right now -->
+                                <Border Visibility="{x:Bind CurrentVisibility, Mode=OneWay}" BorderThickness="3" CornerRadius="4"
+                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" IsHitTestVisible="False" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
@@ -325,6 +343,76 @@
             <Grid x:Name="CompareGrid" Grid.Row="1" Margin="8,0" SizeChanged="CompareGrid_SizeChanged" />
             <TextBlock Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,14" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                        Text="Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ  ·  1–9 убрать из сравнения  ·  Ctrl+колесо зум  ·  L синхронизация  ·  Esc назад" />
+        </Grid>
+
+        <!-- Tournament: two photos, pick the better one; at the end, the winners in order. -->
+        <Grid x:Name="TournamentView" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" Background="{StaticResource LoupeBackgroundBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Padding="20,10" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Турнир" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                    <TextBlock x:Name="TournamentStageText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <ProgressBar x:Name="TournamentProgress" Minimum="0" Maximum="1" />
+                </StackPanel>
+                <TextBlock x:Name="TournamentCountText" Grid.Column="2" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button Grid.Column="3" Click="TournamentClose_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Выйти (Esc)">
+                    <FontIcon Glyph="&#xE8BB;" FontSize="14" />
+                </Button>
+            </Grid>
+
+            <Grid x:Name="TournamentDuel" Grid.Row="1" Margin="16,0" ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid x:Name="TournamentLeft" Grid.Column="0" CornerRadius="8" Background="Transparent" BorderThickness="2"
+                      Tapped="TournamentLeft_Tapped" PointerEntered="TournamentSide_PointerEntered" PointerExited="TournamentSide_PointerExited">
+                    <Image x:Name="TournamentLeftImage" Stretch="Uniform" />
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="10,4" CornerRadius="8" Background="#99000000" IsHitTestVisible="False">
+                        <TextBlock x:Name="TournamentLeftName" FontSize="12" />
+                    </Border>
+                </Grid>
+                <Grid x:Name="TournamentRight" Grid.Column="1" CornerRadius="8" Background="Transparent" BorderThickness="2"
+                      Tapped="TournamentRight_Tapped" PointerEntered="TournamentSide_PointerEntered" PointerExited="TournamentSide_PointerExited">
+                    <Image x:Name="TournamentRightImage" Stretch="Uniform" />
+                    <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="10,4" CornerRadius="8" Background="#99000000" IsHitTestVisible="False">
+                        <TextBlock x:Name="TournamentRightName" FontSize="12" />
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <ScrollViewer x:Name="TournamentResult" Grid.Row="1" Visibility="Collapsed" Padding="24,0">
+                <StackPanel Spacing="16" HorizontalAlignment="Center" MaxWidth="1400">
+                    <TextBlock x:Name="TournamentResultTitle" Style="{StaticResource TitleTextBlockStyle}" HorizontalAlignment="Center" />
+                    <ItemsControl x:Name="TournamentWinners">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VariableSizedWrapGrid Orientation="Horizontal" ItemWidth="236" ItemHeight="200" HorizontalAlignment="Center" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                        <Button Content="Поставить им суперлайк" Style="{StaticResource AccentButtonStyle}" Click="TournamentSuperLike_Click" />
+                        <Button Content="Скопировать все" Click="TournamentCopy_Click" ToolTipService.ToolTip="В буфер обмена как файлы: вставить в папку или в Instagram через браузер" />
+                        <Button Content="Сравнить" Click="TournamentCompare_Click" />
+                        <Button Content="Показать в галерее" Click="TournamentShow_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <TextBlock x:Name="TournamentHint" Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,14" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                       Text="← или 1 — левое лучше  ·  → или 2 — правое лучше  ·  клик по фото тоже выбирает  ·  Backspace назад  ·  Esc выйти" />
         </Grid>
 
         <!-- Toast for short confirmations ("Автопереход выключен", "Не удалось записать XMP"). -->

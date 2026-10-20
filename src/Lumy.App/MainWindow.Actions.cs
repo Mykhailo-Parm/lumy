@@ -47,8 +47,11 @@ public sealed partial class MainWindow
 
     private void Filmstrip_ContextRequested(UIElement sender, ContextRequestedEventArgs e)
     {
-        if ((e.OriginalSource as FrameworkElement)?.DataContext is PhotoItem item)
-            ShowPhotoMenu([item], Filmstrip, e);
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is not PhotoItem item)
+            return;
+
+        var picked = FilmstripPicks();
+        ShowPhotoMenu(picked.Contains(item) ? picked : [item], Filmstrip, e);
     }
 
     private void LoupeMore_Click(object sender, RoutedEventArgs e) =>
@@ -103,8 +106,8 @@ public sealed partial class MainWindow
         Add("Суперлайк", "\uE735", "R", () => RatePhotos(photos, Tier.SuperLike));
         Add("Отказ", "\uE711", "X", () => RatePhotos(photos, Tier.Rejected));
         Add("Снять оценку", "\uE894", "0", () => RatePhotos(photos, Tier.None));
-        if (!InLoupe && photos.Count >= 2)
-            Add($"Сравнить ({Math.Min(photos.Count, MaxCompare)})", "\uE8A9", "C", StartCompare);
+        if (photos.Count >= 2)
+            Add($"Сравнить ({Math.Min(photos.Count, MaxCompare)})", "\uE8A9", "C", () => ComparePhotos(photos));
 
         menu.Items.Add(new MenuFlyoutSeparator());
         Add("Удалить в корзину", "\uE74D", "Delete", () => _ = DeletePhotosAsync(photos));
@@ -224,7 +227,8 @@ public sealed partial class MainWindow
     /// Delete: moves the photos to the Recycle Bin after asking, together with their RAW pair and .xmp sidecar,
     /// so nothing is left half-deleted. They can be restored from the Recycle Bin.
     /// </summary>
-    private async Task DeletePhotosAsync(List<PhotoItem> photos)
+    /// <param name="confirmed">Already confirmed on the phone, so no dialog waits on the computer.</param>
+    private async Task DeletePhotosAsync(List<PhotoItem> photos, bool confirmed = false)
     {
         if (photos.Count == 0)
             return;
@@ -241,7 +245,7 @@ public sealed partial class MainWindow
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Content.XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (!confirmed && await dialog.ShowAsync() != ContentDialogResult.Primary)
             return;
 
         var deleted = await Task.Run(() => photos.Where(MoveToRecycleBin).ToList());
@@ -251,6 +255,7 @@ public sealed partial class MainWindow
         foreach (var photo in deleted)
             _visible.Remove(photo);
         UpdateCounter();
+        PublishRemotePhotos();
 
         if (InLoupe)
         {

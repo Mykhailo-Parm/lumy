@@ -11,6 +11,9 @@ public class RemoteBasicsTests
     [InlineData("SUPER", RemoteCommand.SuperLike)]
     [InlineData("reject-series", RemoteCommand.RejectSeries)]
     [InlineData("swipe", RemoteCommand.StartSwipe)]
+    [InlineData("tournament", RemoteCommand.Tournament)]
+    [InlineData("winners-super", RemoteCommand.WinnersSuperLike)]
+    [InlineData("auto-advance", RemoteCommand.AutoAdvance)]
     public void Parses_command_names(string name, RemoteCommand expected)
     {
         Assert.True(RemoteCommands.TryParse(name, out var command));
@@ -21,7 +24,7 @@ public class RemoteBasicsTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("Like ")]
-    [InlineData("delete")]
+    [InlineData("format-disk")]
     public void Rejects_unknown_commands(string? name) => Assert.False(RemoteCommands.TryParse(name, out _));
 
     [Theory]
@@ -51,4 +54,8 @@ public class RemoteBasicsTests
         var png = RemoteNetwork.QrPng("http://192.168.1.5:8765/?t=abc");
         Assert.Equal([0x89, 0x50, 0x4E, 0x47], png.Take(4).ToArray());
     }
+
+    [Fact]
+    public void Request_numbers_skip_junk() =>
+        Assert.Equal([3L, 17L], new RemoteRequest(RemoteCommand.Compare, "3, x,17,").Numbers());
 }

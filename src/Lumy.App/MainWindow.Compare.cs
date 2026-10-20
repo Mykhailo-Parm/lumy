@@ -26,7 +26,10 @@ public sealed partial class MainWindow
         List<PhotoItem> photos;
         if (InLoupe)
         {
-            photos = _loupeIndex >= 0 && _loupeIndex < _visible.Count ? SeriesOf(_visible[_loupeIndex]) : [];
+            // Photos picked in the filmstrip with Ctrl/Shift win; otherwise the open photo's series.
+            var picked = FilmstripPicks();
+            photos = picked.Count >= 2 ? picked
+                : _loupeIndex >= 0 && _loupeIndex < _visible.Count ? SeriesOf(_visible[_loupeIndex]) : [];
         }
         else
         {
@@ -34,9 +37,14 @@ public sealed partial class MainWindow
             photos = selected.Count >= 2 ? selected : selected.Count == 1 ? SeriesOf(selected[0]) : [];
         }
 
+        ComparePhotos(photos);
+    }
+
+    private void ComparePhotos(List<PhotoItem> photos)
+    {
         if (photos.Count < 2)
         {
-            ShowToast("Выделите 2–9 фото (Ctrl + клик) или фото из серии");
+            ShowToast(InLoupe ? "Выберите 2–9 фото в ленте (Shift или Ctrl + клик) или откройте фото из серии" : "Выделите 2–9 фото (Ctrl + клик) или фото из серии");
             return;
         }
 
@@ -211,7 +219,10 @@ public sealed partial class MainWindow
     private sealed class CompareCell
     {
         private readonly MainWindow _owner;
-        private readonly Image _image = new() { Stretch = Stretch.Uniform };
+        private readonly Image _image = new() { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+
+        // Like the viewer: a canvas the size of the cell holds the photo centred, and zooming scales the canvas.
+        private readonly Grid _canvas = new() { Background = new SolidColorBrush(Colors.Transparent) };
         private readonly TextBlock _number = new() { FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         private readonly FontIcon _tier = new() { FontSize = 14 };
         private int _decodedWidth;
@@ -229,12 +240,13 @@ public sealed partial class MainWindow
                 VerticalScrollMode = ScrollMode.Enabled,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
-                Content = _image,
+                Content = _canvas,
             };
+            _canvas.Children.Add(_image);
             Scroll.SizeChanged += (_, e) =>
             {
-                _image.Width = e.NewSize.Width;
-                _image.Height = e.NewSize.Height;
+                _canvas.Width = e.NewSize.Width;
+                _canvas.Height = e.NewSize.Height;
             };
             Scroll.ViewChanged += (_, _) => _owner.OnCompareViewChanged(this);
 
@@ -259,11 +271,7 @@ public sealed partial class MainWindow
             Root.Children.Add(Scroll);
             Root.Children.Add(label);
             Root.BorderThickness = new Thickness(2);
-            Root.PointerEntered += (_, _) =>
-            {
-                _owner._hoveredCell = this;
-                Root.BorderBrush = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
-            };
+            Root.PointerEntered += (_, _) => Point();
             Root.PointerExited += (_, _) =>
             {
                 if (_owner._hoveredCell == this)
@@ -275,12 +283,35 @@ public sealed partial class MainWindow
 
         public PhotoItem Photo { get; }
 
+        /// <summary>Makes this the photo F, R, X and 0 rate: under the mouse, or picked on the phone.</summary>
+        public void Point()
+        {
+            if (_owner._hoveredCell is { } previous && previous != this)
+                previous.Root.BorderBrush = null;
+            _owner._hoveredCell = this;
+            Root.BorderBrush = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
+        }
+
         public Grid Root { get; }
 
         public ScrollViewer Scroll { get; }
 
         /// <summary>Width / height of the decoded photo, once known.</summary>
         public double? Aspect { get; private set; }
+
+        /// <summary>The photo has the same gap on both sides inside its cell.</summary>
+        public bool IsCentred()
+        {
+            if (_image.ActualWidth <= 0 || Scroll.ActualWidth <= 0)
+                return false;
+
+            var origin = _image.TransformToVisual(Scroll).TransformPoint(new Windows.Foundation.Point(0, 0));
+            var left = origin.X;
+            var right = Scroll.ActualWidth - (origin.X + _image.ActualWidth);
+            var top = origin.Y;
+            var bottom = Scroll.ActualHeight - (origin.Y + _image.ActualHeight);
+            return Math.Abs(left - right) <= 2 && Math.Abs(top - bottom) <= 2;
+        }
 
         public void SetNumber(int n) => _number.Text = n.ToString();
 

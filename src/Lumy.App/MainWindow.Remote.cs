@@ -4,6 +4,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using Lumy.Core;
 using Lumy.Remote;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -25,9 +26,12 @@ public sealed partial class MainWindow
 
     private RemoteServer? _remote;
     private bool _remotePushQueued;
+    private int _remoteListVersion;
+    private string? _remoteMessage;
+    private int _remoteMessageId;
 
-    /// <summary>Photo id → file, for the photos of the open folder. Read by the server off the UI thread, so it is swapped, never changed.</summary>
-    private IReadOnlyDictionary<long, string> _remotePaths = new Dictionary<long, string>();
+    /// <summary>Photo id → record, for the photos of the open folder. Read by the server off the UI thread, so it is swapped, never changed.</summary>
+    private IReadOnlyDictionary<long, PhotoRecord> _remoteRecords = new Dictionary<long, PhotoRecord>();
 
     private TextBlock? _remoteDialogStatus;
 
@@ -42,8 +46,8 @@ public sealed partial class MainWindow
         if (token is null)
             _settings.RemoteToken = token = RemoteServer.NewToken();
 
-        var server = new RemoteServer(token, RemotePreviewAsync);
-        server.CommandReceived += command => DispatcherQueue.TryEnqueue(() => HandleRemoteCommand(command));
+        var server = new RemoteServer(token, RemotePreviewAsync, RemoteThumbnailAsync);
+        server.CommandReceived += request => DispatcherQueue.TryEnqueue(() => HandleRemoteCommand(request));
         server.ClientsChanged += count => DispatcherQueue.TryEnqueue(() => UpdateRemoteIndicators(count));
         try
         {
@@ -60,6 +64,7 @@ public sealed partial class MainWindow
         _settings.RemoteEnabled = true;
         _settings.RemotePort = server.Port;
         UpdateRemoteIndicators(0);
+        PublishRemotePhotos();
         PushRemoteState();
         return true;
     }
@@ -90,12 +95,12 @@ public sealed partial class MainWindow
     /// <summary>A sharp preview for the phone: the shell thumbnail (the embedded preview for RAW), re-encoded as JPEG.</summary>
     private async Task<RemoteImage?> RemotePreviewAsync(long id, CancellationToken cancellationToken)
     {
-        if (!_remotePaths.TryGetValue(id, out var path))
+        if (!_remoteRecords.TryGetValue(id, out var record))
             return null;
 
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
+            var file = await StorageFile.GetFileFromPathAsync(record.Path);
             using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, RemotePreviewSize, ThumbnailOptions.ResizeThumbnail);
             if (thumbnail is null)
                 return null;
@@ -118,7 +123,34 @@ public sealed partial class MainWindow
         }
     }
 
+    /// <summary>A grid tile for the phone: Lumy's own cached thumbnail, made now if it is not there yet.</summary>
+    private async Task<RemoteImage?> RemoteThumbnailAsync(long id, CancellationToken cancellationToken)
+    {
+        if (!_remoteRecords.TryGetValue(id, out var record))
+            return null;
+
+        try
+        {
+            var path = await _thumbnails.GetAsync(record, background: false, cancellationToken);
+            return path is null ? null : new RemoteImage(await File.ReadAllBytesAsync(path, cancellationToken), "image/jpeg");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     // ---------- State sent to the phone ----------
+
+    /// <summary>Gives the phone's grid the gallery as it is now; called when photos are added, removed, filtered or sorted.</summary>
+    private void PublishRemotePhotos()
+    {
+        _remoteListVersion++;
+        _remote?.PublishPhotos(new RemotePhotoList(_remoteListVersion, _visible.Select(ToRemote).ToList()));
+        PushRemoteState();
+    }
+
+    private static RemotePhoto ToRemote(PhotoItem photo) => new(photo.Id, photo.FileName, photo.Tier);
 
     /// <summary>Queues one update to the phone; several changes in a row are sent once, after the screen has settled.</summary>
     private void PushRemoteState()
@@ -136,26 +168,80 @@ public sealed partial class MainWindow
 
     private RemoteState CurrentRemoteState()
     {
+        int likes = 0, supers = 0, rejected = 0;
+        foreach (var p in _all)
+        {
+            switch (p.Tier)
+            {
+                case Tier.Like: likes++; break;
+                case Tier.SuperLike: supers++; break;
+                case Tier.Rejected: rejected++; break;
+            }
+        }
+
+        // What every screen shares: the folder, filters, toggles and the last message.
+        var common = new RemoteState
+        {
+            Folder = _folder is null ? null : System.IO.Path.GetFileName(_folder.TrimEnd('\\', '/')),
+            Folders = _settings.RecentFolders.Select(f => System.IO.Path.GetFileName(f.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : f).ToList(),
+            Filter = CurrentFilter.ToString(),
+            Sort = CurrentSort.ToString(),
+            Counts = new RemoteCounts(_all.Count, likes, supers, _all.Count - likes - supers - rejected, rejected),
+            ListVersion = _remoteListVersion,
+            AutoAdvance = _settings.AutoAdvance,
+            FilmstripVisible = _settings.FilmstripVisible,
+            FullScreen = AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen,
+            Message = _remoteMessage,
+            MessageId = _remoteMessageId,
+        };
+
         if (InSwipe && _swipe is { } session)
         {
-            var counts = new RemoteState { Liked = session.Liked, SuperLiked = session.SuperLiked, Rejected = session.Rejected, Total = session.Total };
+            var counts = common with { Liked = session.Liked, SuperLiked = session.SuperLiked, Rejected = session.Rejected, Total = session.Total };
             return session.IsFinished
                 ? counts with { Mode = "swipe-done" }
                 : Describe(session.Current!, session.Position, session.Total, counts with { Mode = "swipe" });
         }
 
+        if (InTournament)
+        {
+            if (TournamentResult.Visibility == Visibility.Visible)
+                return common with
+                {
+                    Mode = "tournament-done",
+                    Photos = _tournamentWinners.Select((p, i) => ToRemote(p) with { Label = $"{i + 1}" }).ToList(),
+                    Total = _tournamentWinners.Count,
+                    Detail = $"{_tournamentAnswers.Count} дуэлей",
+                };
+
+            return common with
+            {
+                Mode = "tournament",
+                Photos = _duel is { } duel ? [ToRemote(duel.Left), ToRemote(duel.Right)] : [],
+                Position = _duel?.Number ?? 0,
+                Total = _tournamentEstimate,
+                Detail = TournamentStageText.Text,
+            };
+        }
+
         if (InCompare)
-            return new RemoteState { Mode = "compare", Total = _compareCells.Count };
+            return common with
+            {
+                Mode = "compare",
+                Photos = _compareCells.Select((c, i) => ToRemote(c.Photo) with { Label = $"{i + 1}" }).ToList(),
+                Focus = _hoveredCell is { } cell ? _compareCells.IndexOf(cell) : -1,
+                Total = _compareCells.Count,
+            };
 
         if (InLoupe && _loupeIndex >= 0 && _loupeIndex < _visible.Count)
-            return Describe(_visible[_loupeIndex], _loupeIndex + 1, _visible.Count, new RemoteState { Mode = "loupe" });
+            return Describe(_visible[_loupeIndex], _loupeIndex + 1, _visible.Count, common with { Mode = "loupe" });
 
         if (Gallery.SelectedItem is PhotoItem selected)
-            return Describe(selected, Gallery.SelectedIndex + 1, _visible.Count, new RemoteState { Mode = "gallery" });
+            return Describe(selected, Gallery.SelectedIndex + 1, _visible.Count, common with { Mode = "gallery" });
 
-        return _visible.Count > 0
-            ? new RemoteState { Mode = "gallery", Total = _visible.Count }
-            : RemoteState.Empty;
+        return _visible.Count > 0 || _all.Count > 0
+            ? common with { Mode = "gallery", Total = _visible.Count }
+            : common;
     }
 
     private static RemoteState Describe(PhotoItem photo, int position, int total, RemoteState state) => state with
@@ -170,15 +256,67 @@ public sealed partial class MainWindow
 
     // ---------- Commands from the phone ----------
 
-    private void HandleRemoteCommand(RemoteCommand command)
+    private void HandleRemoteCommand(RemoteRequest request)
     {
-        if (InSwipe)
-            HandleRemoteSwipe(command);
-        else if (InCompare)
-            HandleRemoteCompare(command);
-        else
-            HandleRemoteBrowse(command);
-        PushRemoteState();
+        try
+        {
+            // These work the same on every screen.
+            switch (request.Command)
+            {
+                case RemoteCommand.FullScreen: ToggleFullScreen(); return;
+                case RemoteCommand.AutoAdvance: ToggleAutoAdvance(); return;
+                case RemoteCommand.OpenFolder: RemoteOpenFolder(request); return;
+                case RemoteCommand.Tournament: _ = RemoteTournamentAsync(request); return;
+                case RemoteCommand.Compare: _ = RemoteCompareAsync(request); return;
+            }
+
+            if (InTournament)
+                HandleRemoteTournament(request);
+            else if (InSwipe)
+                HandleRemoteSwipe(request.Command);
+            else if (InCompare)
+                HandleRemoteCompare(request);
+            else
+                HandleRemoteBrowse(request);
+        }
+        catch (Exception e)
+        {
+            CrashLog.Write(e);
+        }
+        finally
+        {
+            PushRemoteState();
+        }
+    }
+
+    private void HandleRemoteTournament(RemoteRequest request)
+    {
+        var done = TournamentResult.Visibility == Visibility.Visible;
+        switch (request.Command)
+        {
+            case RemoteCommand.Previous when !done: PickDuel(left: true); break;
+            case RemoteCommand.Next when !done: PickDuel(left: false); break;
+            case RemoteCommand.Pick when !done && request.Numbers() is [var side]: PickDuel(left: side == 0); break;
+            case RemoteCommand.Undo: UndoDuel(); break;
+            case RemoteCommand.WinnersSuperLike when done: SuperLikeWinners(); break;
+            case RemoteCommand.WinnersShow when done: _ = ShowWinnersAsync(); break;
+            case RemoteCommand.WinnersCompare when done: _ = CompareWinnersAsync(); break;
+            case RemoteCommand.Goto when done && request.Numbers() is [var id] && _tournamentWinners.FirstOrDefault(w => w.Id == id) is { } winner:
+                _ = OpenWinnerAsync(winner);
+                break;
+
+            // The phone has already asked "leave the tournament?", so no dialog waits on the computer.
+            case RemoteCommand.Back: _ = CloseTournamentAsync(ask: false); break;
+        }
+    }
+
+    private async Task OpenWinnerAsync(PhotoItem winner)
+    {
+        await CloseTournamentAsync(ask: false);
+        if (!_visible.Contains(winner))
+            SetFilter(TierFilter.All);
+        if (_visible.IndexOf(winner) is var index and >= 0)
+            OpenLoupe(index);
     }
 
     private void HandleRemoteSwipe(RemoteCommand command)
@@ -189,38 +327,54 @@ public sealed partial class MainWindow
             case RemoteCommand.SuperLike: Swipe(SwipeMove.SuperLike); break;
             case RemoteCommand.Reject: Swipe(SwipeMove.Reject); break;
             case RemoteCommand.RejectSeries: Swipe(SwipeMove.RejectSeries); break;
-            case RemoteCommand.Skip: Swipe(SwipeMove.Skip); break;
-            case RemoteCommand.Undo: SwipeBack(); break;
+            case RemoteCommand.Skip or RemoteCommand.Next: Swipe(SwipeMove.Skip); break;
+            case RemoteCommand.Undo or RemoteCommand.Previous: SwipeBack(); break;
             case RemoteCommand.Back: CloseSwipe(); break;
         }
     }
 
-    private void HandleRemoteCompare(RemoteCommand command)
+    private void HandleRemoteCompare(RemoteRequest request)
     {
-        // Comparing is about pointing at one of several photos, which a phone cannot do; it can only leave.
-        if (command is RemoteCommand.Back)
-            CloseCompare();
-        else if (command is RemoteCommand.Undo)
+        var focus = _hoveredCell;
+        switch (request.Command)
         {
-            UndoOrRedo(redo: false);
-            RefreshCompareBadges();
-        }
-        else if (command is RemoteCommand.StartSwipe)
-        {
-            CloseCompare();
-            StartSwipe();
+            case RemoteCommand.Pick when request.Numbers() is [var i] && i >= 0 && i < _compareCells.Count:
+                _compareCells[(int)i].Point();
+                break;
+            case RemoteCommand.Remove when request.Numbers() is [var i]:
+                RemoveFromCompare((int)i);
+                break;
+            case RemoteCommand.Like: RateHovered(Tier.Like); break;
+            case RemoteCommand.SuperLike: RateHovered(Tier.SuperLike); break;
+            case RemoteCommand.Reject or RemoteCommand.RejectSeries: RateHovered(Tier.Rejected); break;
+            case RemoteCommand.Clear: RateHovered(Tier.None); break;
+            case RemoteCommand.Undo or RemoteCommand.Redo:
+                UndoOrRedo(redo: request.Command == RemoteCommand.Redo);
+                RefreshCompareBadges();
+                break;
+            case RemoteCommand.Open when focus is not null:
+                CloseCompare();
+                if (_visible.IndexOf(focus.Photo) is var index and >= 0)
+                    OpenLoupe(index);
+                break;
+            case RemoteCommand.Back: CloseCompare(); break;
+            case RemoteCommand.StartSwipe:
+                CloseCompare();
+                StartSwipe();
+                break;
         }
     }
 
-    private void HandleRemoteBrowse(RemoteCommand command)
+    private void HandleRemoteBrowse(RemoteRequest request)
     {
-        switch (command)
+        switch (request.Command)
         {
             case RemoteCommand.Like: Rate(Tier.Like); break;
             case RemoteCommand.SuperLike: Rate(Tier.SuperLike); break;
             case RemoteCommand.Reject or RemoteCommand.RejectSeries: Rate(Tier.Rejected); break;
             case RemoteCommand.Clear: Rate(Tier.None); break;
             case RemoteCommand.Undo: UndoOrRedo(redo: false); break;
+            case RemoteCommand.Redo: UndoOrRedo(redo: true); break;
             case RemoteCommand.Next or RemoteCommand.Skip: StepRemote(+1); break;
             case RemoteCommand.Previous: StepRemote(-1); break;
             case RemoteCommand.NextUnrated: StepRemote(+1, unratedOnly: true); break;
@@ -228,7 +382,99 @@ public sealed partial class MainWindow
             case RemoteCommand.Back: CloseLoupe(); break;
             case RemoteCommand.Zoom when InLoupe: _ = ToggleZoomAsync(); break;
             case RemoteCommand.StartSwipe: StartSwipe(); break;
+            case RemoteCommand.Filmstrip when InLoupe: ToggleFilmstrip(); break;
+            case RemoteCommand.Goto when request.Numbers() is [var id]: RemoteGoto(id); break;
+            case RemoteCommand.Filter when Enum.TryParse<TierFilter>(request.Arg, out var filter):
+                CloseLoupe();
+                SetFilter(filter);
+                break;
+            case RemoteCommand.Sort:
+                var sortIndex = SortBox.Items.OfType<ComboBoxItem>().ToList().FindIndex(i => i.Tag as string == request.Arg);
+                if (sortIndex >= 0)
+                    SortBox.SelectedIndex = sortIndex;
+                break;
+            case RemoteCommand.Delete:
+                var ids = request.Numbers().ToHashSet();
+                var photos = ids.Count > 0 ? _all.Where(p => ids.Contains(p.Id)).ToList() : CurrentPhotos();
+                _ = DeletePhotosAsync(photos, confirmed: true);
+                break;
         }
+    }
+
+    /// <summary>A tap in the phone's grid: that photo opens in the viewer, or is selected in the gallery.</summary>
+    private void RemoteGoto(long id)
+    {
+        var index = _visible.ToList().FindIndex(p => p.Id == id);
+        if (index < 0)
+            return;
+
+        if (InLoupe)
+        {
+            ShowInLoupe(index);
+            return;
+        }
+
+        Gallery.SelectedIndex = index;
+        Gallery.ScrollIntoView(_visible[index]);
+    }
+
+    private void RemoteOpenFolder(RemoteRequest request)
+    {
+        var folders = _settings.RecentFolders;
+        if (request.Numbers() is [var i] && i >= 0 && i < folders.Count && Directory.Exists(folders[(int)i]))
+        {
+            if (InTournament)
+                _ = CloseTournamentAsync(ask: false);
+            _ = OpenFolderAsync(folders[(int)i]);
+        }
+        else
+        {
+            ShowToast("Эта папка больше не найдена");
+        }
+    }
+
+    /// <summary>Compare from the phone: the photos it lists, or what C would compare on the computer.</summary>
+    private async Task RemoteCompareAsync(RemoteRequest request)
+    {
+        if (InTournament)
+            await CloseTournamentAsync(ask: false);
+        if (InSwipe)
+            CloseSwipe();
+
+        var ids = request.Numbers();
+        if (ids.Count == 0)
+        {
+            StartCompare();
+            return;
+        }
+
+        var byId = _all.ToDictionary(p => p.Id);
+        ComparePhotos(ids.Where(byId.ContainsKey).Select(id => byId[id]).Distinct().ToList());
+    }
+
+    /// <summary>"likes:10", "shown:5" or "12,15,18:3": which photos compete, and how many win.</summary>
+    private async Task RemoteTournamentAsync(RemoteRequest request)
+    {
+        var parts = (request.Arg ?? "").Split(':');
+        var winners = parts.Length > 1 && int.TryParse(parts[1], out var n) ? Math.Clamp(n, 1, 50) : DefaultWinners;
+        var ids = new RemoteRequest(RemoteCommand.Tournament, parts[0]).Numbers().ToHashSet();
+        var pool = parts[0] switch
+        {
+            "likes" => _all.Where(p => p.Tier >= Tier.Like).ToList(),
+            "shown" or "" => _visible.ToList(),
+            _ => _all.Where(p => ids.Contains(p.Id)).ToList(),
+        };
+        if (pool.Count < 2)
+        {
+            ShowToast(parts[0] == "likes" ? "Для турнира из лайков нужно хотя бы 2 лайка" : "Для турнира нужно хотя бы 2 фото");
+            return;
+        }
+
+        if (InTournament)
+            await CloseTournamentAsync(ask: false);
+        if (InSwipe)
+            CloseSwipe();
+        StartTournament(new Tournament<PhotoItem>(pool, winners, p => p.SeriesId));
     }
 
     private void StepRemote(int delta, bool unratedOnly = false)

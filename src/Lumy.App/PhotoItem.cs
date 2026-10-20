@@ -14,6 +14,8 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
     private ImageSource? _thumbnail;
     private int _thumbnailRequest;
     private int _thumbnailUsers;
+    private bool _isCurrent;
+    private bool _isPicked;
     private int _seriesId;
     private int _seriesSize = 1;
     private int _seriesPosition = 1;
@@ -90,6 +92,36 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
         OnPropertyChanged(nameof(SeriesBadgeText));
         OnPropertyChanged(nameof(SeriesBadgeVisibility));
     }
+
+    /// <summary>The photo open in the viewer; the filmstrip frames it.</summary>
+    public bool IsCurrent
+    {
+        get => _isCurrent;
+        set
+        {
+            if (_isCurrent == value)
+                return;
+            _isCurrent = value;
+            OnPropertyChanged(nameof(CurrentVisibility));
+        }
+    }
+
+    public Visibility CurrentVisibility => _isCurrent ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Picked in the filmstrip with Ctrl or Shift, for comparing.</summary>
+    public bool IsPicked
+    {
+        get => _isPicked;
+        set
+        {
+            if (_isPicked == value)
+                return;
+            _isPicked = value;
+            OnPropertyChanged(nameof(PickedVisibility));
+        }
+    }
+
+    public Visibility PickedVisibility => _isPicked ? Visibility.Visible : Visibility.Collapsed;
 
     public ImageSource? Thumbnail
     {

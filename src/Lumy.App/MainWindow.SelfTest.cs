@@ -1,4 +1,5 @@
 using Lumy.Core;
+using Lumy.Remote;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using Windows.Foundation;
@@ -70,8 +71,27 @@ public sealed partial class MainWindow
             Check(LoupeScroll.ZoomFactor <= 1.01f, $"Z again fits the photo (zoom {LoupeScroll.ZoomFactor:0.00})");
 
             Check(BuildPhotoMenu(CurrentPhotos()).Items.Count >= 10, "right-click menu has its actions");
+            Check(_visible[_loupeIndex].IsCurrent && _visible.Count(p => p.IsCurrent) == 1, "filmstrip frames the open photo");
+
+            if (_visible.Count >= 3)
+            {
+                var open = _visible[_loupeIndex];
+                var first = Math.Min(_loupeIndex, _visible.Count - 3);
+                Filmstrip.SelectRange(new ItemIndexRange(first, 3));
+                await Task.Delay(300);
+                Check(FilmstripPicks().Count == 3 && _visible[_loupeIndex] == open, "shift-picking in the filmstrip keeps the open photo");
+                StartCompare();
+                await Task.Delay(1500);
+                Check(InCompare && _compareCells.Count == 3, "compare opens with the filmstrip picks");
+                CloseCompare();
+                if (!InLoupe)
+                    OpenLoupe(_visible.IndexOf(open));
+                await Task.Delay(500);
+            }
+
             CloseLoupe();
             Check(!InLoupe, "viewer closes");
+            Check(_all.All(p => !p.IsPicked && !p.IsCurrent), "closing the viewer clears the filmstrip marks");
 
             if (_visible.Count >= 3)
             {
@@ -80,6 +100,7 @@ public sealed partial class MainWindow
                 StartCompare();
                 await Task.Delay(1500);
                 Check(InCompare && _compareCells.Count >= 2, "compare opens with the selection");
+                Check(_compareCells.All(c => c.IsCentred()), "compare photos are centred in their cells");
                 CloseCompare();
             }
 
@@ -95,6 +116,36 @@ public sealed partial class MainWindow
             CloseSwipe();
             Check(!InSwipe, "swipe mode closes");
 
+            if (_visible.Count >= 12)
+            {
+                StartTournament(new Tournament<PhotoItem>(_visible.ToList(), 5, p => p.SeriesId));
+                var duels = 0;
+                while (TournamentResult.Visibility != Visibility.Visible && duels < 2000)
+                {
+                    await Task.Delay(20);
+                    if (_duelAnswer is not null)
+                    {
+                        PickDuel(left: duels % 3 != 0);
+                        duels++;
+                    }
+                }
+
+                Check(InTournament && _tournamentWinners.Count == 5, $"tournament finds 5 winners in {duels} duels");
+                UndoDuel();
+                await Task.Delay(500);
+                Check(TournamentDuel.Visibility == Visibility.Visible && _duelAnswer is not null, "undo goes back to the last duel");
+                PickDuel(left: true);
+                await Task.Delay(500);
+                Check(TournamentResult.Visibility == Visibility.Visible && _tournamentWinners.Count == 5, "tournament finishes again after undo");
+                await CloseTournamentAsync(ask: false);
+                Check(!InTournament, "tournament closes");
+            }
+
+            await RunRemoteChecksAsync(Check);
+
+            Check(_settings.RecentFolders.FirstOrDefault() == folder, "folder is first in recent folders");
+            Check(FilterBar.Items[0].Text.EndsWith(_all.Count.ToString(), StringComparison.Ordinal), $"filters show counts ({FilterBar.Items[0].Text})");
+
             await Task.Delay(3000);
             Check(Directory.Exists(ThumbnailService.DefaultFolder)
                 && Directory.EnumerateFiles(ThumbnailService.DefaultFolder, "*.jpg", SearchOption.AllDirectories).Any(), "thumbnail cache is written");
@@ -109,6 +160,62 @@ public sealed partial class MainWindow
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(report)!);
         await File.WriteAllLinesAsync(report, lines);
         Environment.Exit(failures == 0 ? 0 : 1);
+    }
+
+    /// <summary>Drives Lumy the way the phone does, through the same commands, and reads back what the phone would show.</summary>
+    private async Task RunRemoteChecksAsync(Action<bool, string> check)
+    {
+        void Send(RemoteCommand command, string? arg = null) => HandleRemoteCommand(new RemoteRequest(command, arg));
+        static string Text(long n) => n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        Send(RemoteCommand.Filter, nameof(TierFilter.Unrated));
+        await Task.Delay(300);
+        check(CurrentFilter == TierFilter.Unrated && CurrentRemoteState().Filter == "Unrated", "phone: filter switches");
+        Send(RemoteCommand.Filter, nameof(TierFilter.All));
+        await Task.Delay(300);
+
+        Send(RemoteCommand.Goto, Text(_visible[4].Id));
+        Send(RemoteCommand.Open);
+        await Task.Delay(800);
+        check(InLoupe && _loupeIndex == 4 && CurrentRemoteState() is { Mode: "loupe" } loupe && loupe.PhotoId == _visible[4].Id, "phone: grid tap opens that photo");
+        Send(RemoteCommand.Back);
+
+        Send(RemoteCommand.Compare, string.Join(',', _visible.Take(3).Select(p => Text(p.Id))));
+        await Task.Delay(1000);
+        check(InCompare && CurrentRemoteState() is { Mode: "compare", Photos.Count: 3 }, "phone: compares the photos it picked");
+        Send(RemoteCommand.Pick, "1");
+        Send(RemoteCommand.SuperLike);
+        check(_compareCells.Count == 3 && _compareCells[1].Photo.Tier == Tier.SuperLike && CurrentRemoteState().Focus == 1, "phone: rates the photo it points at in compare");
+        Send(RemoteCommand.Undo);
+        Send(RemoteCommand.Back);
+        await Task.Delay(300);
+
+        Send(RemoteCommand.Tournament, "shown:3");
+        await Task.Delay(500);
+        var duels = 0;
+        var sawDuel = false;
+        while (InTournament && TournamentResult.Visibility != Visibility.Visible && duels < 2000)
+        {
+            if (_duelAnswer is not null)
+            {
+                sawDuel |= CurrentRemoteState() is { Mode: "tournament", Photos.Count: 2 };
+                Send(RemoteCommand.Pick, Text(duels % 2));
+                duels++;
+            }
+
+            await Task.Delay(20);
+        }
+
+        check(sawDuel, "phone: sees both photos of a duel");
+        check(CurrentRemoteState() is { Mode: "tournament-done", Photos.Count: 3 }, $"phone: runs a tournament to its top 3 ({duels} duels)");
+        Send(RemoteCommand.Back);
+        await Task.Delay(300);
+        check(!InTournament, "phone: leaves the tournament");
+
+        var before = _settings.AutoAdvance;
+        Send(RemoteCommand.AutoAdvance);
+        check(CurrentRemoteState().AutoAdvance != before, "phone: toggles auto-advance");
+        Send(RemoteCommand.AutoAdvance);
     }
 
     /// <summary>The photo has the same gap on its left and right inside the viewer.</summary>
