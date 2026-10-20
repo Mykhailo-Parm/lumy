@@ -23,7 +23,7 @@ Every push builds a ready-to-run copy on GitHub Actions: open the latest
 
 To build locally: `dotnet run --project src/Lumy.App -p:Platform=x64`.
 
-## Keys (v0.1)
+## Keys
 
 | Key | Action |
 | --- | --- |
@@ -39,7 +39,14 @@ To build locally: `dotnet run --project src/Lumy.App -p:Platform=x64`.
 | Z or double-click | Zoom to 100% and back |
 | F11 | Full screen |
 | ` | Toggle moving to the next photo after rating |
+| S | Swipe mode over unrated photos: → like, ↑ super like, ← reject, ↓ later, Backspace back, Shift+← rejects the whole series |
+| C | Compare the selected photos (2–9), or every frame of the current photo's series |
+| 1–9 (compare) | Drop that photo from the comparison; F / R / X rate the photo under the mouse; L toggles synced zoom |
 | ? or F1 | Key reference |
+
+Photos shot within a few seconds of each other that look alike are grouped
+into a series (badge "3/8" on the tile), using capture time and a perceptual
+hash of the thumbnail.
 
 Ratings are also written to the `.xmp` sidecar of RAW files (Like = 4 stars,
 Super like = 5, Reject = −1), so Lightroom and Bridge see them.

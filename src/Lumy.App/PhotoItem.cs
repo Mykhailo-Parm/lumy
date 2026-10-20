@@ -16,6 +16,9 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
     private Tier _tier = record.Tier;
     private ImageSource? _thumbnail;
     private int _thumbnailRequest;
+    private int _seriesId;
+    private int _seriesSize = 1;
+    private int _seriesPosition = 1;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -63,6 +66,32 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
 
     /// <summary>Rejected photos stay visible but fade back so the keepers stand out.</summary>
     public double ImageOpacity => Tier == Tier.Rejected ? 0.35 : 1.0;
+
+    /// <summary>Perceptual hash of the thumbnail; filled in the background after a folder opens.</summary>
+    public ulong? Hash { get; set; } = record.Hash;
+
+    /// <summary>Which burst of near-identical frames this photo belongs to; 0 when it stands alone.</summary>
+    public int SeriesId => _seriesId;
+
+    public int SeriesSize => _seriesSize;
+
+    public int SeriesPosition => _seriesPosition;
+
+    public string SeriesBadgeText => $"{_seriesPosition}/{_seriesSize}";
+
+    public Visibility SeriesBadgeVisibility => _seriesSize > 1 ? Visibility.Visible : Visibility.Collapsed;
+
+    public void SetSeries(int id, int position, int size)
+    {
+        if (_seriesId == id && _seriesPosition == position && _seriesSize == size)
+            return;
+        _seriesId = id;
+        _seriesPosition = position;
+        _seriesSize = size;
+        OnPropertyChanged(nameof(SeriesId));
+        OnPropertyChanged(nameof(SeriesBadgeText));
+        OnPropertyChanged(nameof(SeriesBadgeVisibility));
+    }
 
     public ImageSource? Thumbnail
     {

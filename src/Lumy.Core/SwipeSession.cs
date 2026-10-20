@@ -24,6 +24,9 @@ public sealed class SwipeSession<T> where T : class, IRatedPhoto
     /// <summary>The photo after <see cref="Current"/>, for preloading.</summary>
     public T? Next => _index + 1 < _queue.Count ? _queue[_index + 1] : null;
 
+    /// <summary>The current photo and the next ones after it, for preloading.</summary>
+    public IEnumerable<T> Upcoming(int count) => _queue.Skip(_index).Take(count);
+
     /// <summary>1-based position of the current card.</summary>
     public int Position => Math.Min(_index + 1, _queue.Count);
 

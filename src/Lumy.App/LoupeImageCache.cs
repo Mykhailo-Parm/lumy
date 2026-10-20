@@ -30,11 +30,19 @@ public sealed class LoupeImageCache(int decodeWidth)
     /// <summary>Decodes the neighbours of <paramref name="index"/> and forgets bitmaps that are far away.</summary>
     public void Prefetch(IReadOnlyList<PhotoItem> items, int index)
     {
+        var from = Math.Max(0, index - Radius);
+        var to = Math.Min(items.Count - 1, index + Radius);
+        Retain(Enumerable.Range(from, Math.Max(0, to - from + 1)).Select(i => items[i]));
+    }
+
+    /// <summary>Decodes exactly these photos and forgets every other bitmap.</summary>
+    public void Retain(IEnumerable<PhotoItem> items)
+    {
         var keep = new HashSet<long>();
-        for (var i = Math.Max(0, index - Radius); i <= Math.Min(items.Count - 1, index + Radius); i++)
+        foreach (var item in items)
         {
-            keep.Add(items[i].Id);
-            _ = GetAsync(items[i]);
+            keep.Add(item.Id);
+            _ = GetAsync(item);
         }
 
         foreach (var id in _screen.Keys.Where(id => !keep.Contains(id)).ToList())
@@ -46,7 +54,8 @@ public sealed class LoupeImageCache(int decodeWidth)
     /// <summary>The image at its native resolution, for checking focus at 100%. Not cached: only one is needed at a time.</summary>
     public static Task<BitmapImage?> LoadFullResolutionAsync(PhotoItem item) => LoadAsync(item.Path, 0);
 
-    private static async Task<BitmapImage?> LoadAsync(string path, int width)
+    /// <summary>Decodes a photo at the given width in physical pixels (0 = native). Used directly by compare, which sizes per cell.</summary>
+    public static async Task<BitmapImage?> LoadAsync(string path, int width)
     {
         try
         {
