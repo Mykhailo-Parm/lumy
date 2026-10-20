@@ -16,6 +16,9 @@
     <!-- Unpackaged and self-contained: Lumy.exe runs straight from the build folder, no installer needed. -->
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- Builds Lumy.pri, the resource index WinUI needs at run time to find its styles and theme brushes.
+         Without it the window fails to load its XAML and the app closes right after starting. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
   </PropertyGroup>
 
   <ItemGroup>
