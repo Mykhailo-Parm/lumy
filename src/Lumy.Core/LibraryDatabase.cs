@@ -19,6 +19,9 @@ public sealed record PhotoRecord(
     public ulong? Hash { get; init; }
 }
 
+/// <summary>A named, ordered set of photos, such as a carousel. Photos are referenced, never copied.</summary>
+public sealed record Album(long Id, string Name, int Count, long? CoverPhotoId);
+
 /// <summary>
 /// The local library: ratings and settings in one SQLite file under %LOCALAPPDATA%\Lumy.
 /// Photos themselves are never copied or changed; the database only points at them.
@@ -26,7 +29,7 @@ public sealed record PhotoRecord(
 /// </summary>
 public sealed class LibraryDatabase : IDisposable
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
 
     private readonly SqliteConnection _connection;
     private readonly Lock _lock = new();
@@ -166,6 +169,160 @@ public sealed class LibraryDatabase : IDisposable
             Execute("INSERT INTO settings (key, value) VALUES ($k, $v) ON CONFLICT(key) DO UPDATE SET value = excluded.value", ("$k", key), ("$v", value));
     }
 
+    // ---------- Edits ----------
+
+    /// <summary>The saved edits of these photos; photos without one are left out.</summary>
+    public IReadOnlyDictionary<long, PhotoEdit> GetEdits(IEnumerable<long> ids)
+    {
+        var wanted = ids.ToHashSet();
+        var result = new Dictionary<long, PhotoEdit>();
+        if (wanted.Count == 0)
+            return result;
+
+        lock (_lock)
+        {
+            using var command = Command("SELECT photo_id, data FROM edits", []);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var id = reader.GetInt64(0);
+                if (wanted.Contains(id) && PhotoEdit.FromJson(reader.GetString(1)) is { } edit)
+                    result[id] = edit;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Saves an edit; null or an empty one deletes it.</summary>
+    public void SetEdit(long photoId, PhotoEdit? edit)
+    {
+        lock (_lock)
+        {
+            if (edit is null || edit.IsEmpty)
+                Execute("DELETE FROM edits WHERE photo_id = $id", ("$id", photoId));
+            else
+                Execute(
+                    "INSERT INTO edits (photo_id, data, updated_utc) VALUES ($id, $d, $u) ON CONFLICT(photo_id) DO UPDATE SET data = excluded.data, updated_utc = excluded.updated_utc",
+                    ("$id", photoId), ("$d", edit.Normalized().ToJson()), ("$u", DateTime.UtcNow.Ticks));
+        }
+    }
+
+    // ---------- Albums ----------
+
+    public Album CreateAlbum(string name)
+    {
+        lock (_lock)
+        {
+            var clean = CleanName(name);
+            var id = ExecuteScalar<long>("INSERT INTO albums (name, created_utc) VALUES ($n, $u) RETURNING id", ("$n", clean), ("$u", DateTime.UtcNow.Ticks));
+            return new Album(id, clean, 0, null);
+        }
+    }
+
+    /// <summary>Every album, newest first, with its size and first photo.</summary>
+    public IReadOnlyList<Album> Albums()
+    {
+        lock (_lock)
+        {
+            using var command = Command(
+                """
+                SELECT a.id, a.name,
+                       (SELECT COUNT(*) FROM album_photos p WHERE p.album_id = a.id),
+                       (SELECT p.photo_id FROM album_photos p WHERE p.album_id = a.id ORDER BY p.position LIMIT 1)
+                FROM albums a ORDER BY a.created_utc DESC, a.id DESC
+                """, []);
+            using var reader = command.ExecuteReader();
+            var albums = new List<Album>();
+            while (reader.Read())
+                albums.Add(new Album(reader.GetInt64(0), reader.GetString(1), reader.GetInt32(2), reader.IsDBNull(3) ? null : reader.GetInt64(3)));
+            return albums;
+        }
+    }
+
+    public void RenameAlbum(long albumId, string name)
+    {
+        lock (_lock)
+            Execute("UPDATE albums SET name = $n WHERE id = $id", ("$n", CleanName(name)), ("$id", albumId));
+    }
+
+    public void DeleteAlbum(long albumId)
+    {
+        lock (_lock)
+            Execute("DELETE FROM albums WHERE id = $id", ("$id", albumId));
+    }
+
+    /// <summary>Appends photos to the end of an album, skipping ones already in it; returns how many were added.</summary>
+    public int AddToAlbum(long albumId, IEnumerable<long> photoIds)
+    {
+        lock (_lock)
+        {
+            using var transaction = _connection.BeginTransaction();
+            var next = ExecuteScalar<long>("SELECT COALESCE(MAX(position), -1) + 1 FROM album_photos WHERE album_id = $a", ("$a", albumId));
+            var added = 0;
+            foreach (var id in photoIds.Distinct())
+            {
+                using var command = Command(
+                    "INSERT OR IGNORE INTO album_photos (album_id, photo_id, position) VALUES ($a, $p, $n)",
+                    [("$a", albumId), ("$p", id), ("$n", next)]);
+                if (command.ExecuteNonQuery() > 0)
+                {
+                    added++;
+                    next++;
+                }
+            }
+
+            transaction.Commit();
+            return added;
+        }
+    }
+
+    public void RemoveFromAlbum(long albumId, IEnumerable<long> photoIds)
+    {
+        lock (_lock)
+        {
+            using var transaction = _connection.BeginTransaction();
+            foreach (var id in photoIds)
+                Execute("DELETE FROM album_photos WHERE album_id = $a AND photo_id = $p", ("$a", albumId), ("$p", id));
+            transaction.Commit();
+        }
+    }
+
+    /// <summary>Puts the album in this order; photos not listed keep their relative order after the listed ones.</summary>
+    public void SetAlbumOrder(long albumId, IReadOnlyList<long> photoIds)
+    {
+        lock (_lock)
+        {
+            var current = AlbumIds(albumId);
+            var order = photoIds.Where(current.Contains).Distinct().Concat(current.Except(photoIds)).ToList();
+            using var transaction = _connection.BeginTransaction();
+            for (var i = 0; i < order.Count; i++)
+                Execute("UPDATE album_photos SET position = $n WHERE album_id = $a AND photo_id = $p", ("$n", i), ("$a", albumId), ("$p", order[i]));
+            transaction.Commit();
+        }
+    }
+
+    /// <summary>The album's photos in order. They can come from different folders.</summary>
+    public IReadOnlyList<PhotoRecord> AlbumPhotos(long albumId)
+    {
+        lock (_lock)
+            return QueryMany(
+                "SELECT ph.* FROM album_photos ap JOIN photos ph ON ph.id = ap.photo_id WHERE ap.album_id = $a ORDER BY ap.position",
+                ("$a", albumId));
+    }
+
+    private List<long> AlbumIds(long albumId)
+    {
+        using var command = Command("SELECT photo_id FROM album_photos WHERE album_id = $a ORDER BY position", [("$a", albumId)]);
+        using var reader = command.ExecuteReader();
+        var ids = new List<long>();
+        while (reader.Read())
+            ids.Add(reader.GetInt64(0));
+        return ids;
+    }
+
+    private static string CleanName(string name) => string.IsNullOrWhiteSpace(name) ? "Без названия" : name.Trim();
+
     public void Dispose() => _connection.Dispose();
 
     private void Migrate()
@@ -178,6 +335,8 @@ public sealed class LibraryDatabase : IDisposable
             CreateSchemaV1();
         if (version < 2)
             Execute("ALTER TABLE photos ADD COLUMN phash INTEGER");
+        if (version < 3)
+            CreateSchemaV3();
 
         Execute($"PRAGMA user_version = {SchemaVersion}");
     }
@@ -204,6 +363,28 @@ public sealed class LibraryDatabase : IDisposable
             );
             """);
     }
+
+    /// <summary>Edits and albums. Albums only point at photos; deleting a photo's row drops it from its albums.</summary>
+    private void CreateSchemaV3() => Execute(
+        """
+        CREATE TABLE IF NOT EXISTS edits (
+            photo_id    INTEGER PRIMARY KEY REFERENCES photos (id) ON DELETE CASCADE,
+            data        TEXT    NOT NULL,
+            updated_utc INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS albums (
+            id          INTEGER PRIMARY KEY,
+            name        TEXT    NOT NULL,
+            created_utc INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS album_photos (
+            album_id INTEGER NOT NULL REFERENCES albums (id) ON DELETE CASCADE,
+            photo_id INTEGER NOT NULL REFERENCES photos (id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            PRIMARY KEY (album_id, photo_id)
+        );
+        CREATE INDEX IF NOT EXISTS ix_album_photos_order ON album_photos (album_id, position);
+        """);
 
     private void Update(PhotoRecord r) => Execute(
         """
