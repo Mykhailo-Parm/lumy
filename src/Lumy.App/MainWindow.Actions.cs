@@ -227,7 +227,8 @@ public sealed partial class MainWindow
     /// Delete: moves the photos to the Recycle Bin after asking, together with their RAW pair and .xmp sidecar,
     /// so nothing is left half-deleted. They can be restored from the Recycle Bin.
     /// </summary>
-    private async Task DeletePhotosAsync(List<PhotoItem> photos)
+    /// <param name="confirmed">Already confirmed on the phone, so no dialog waits on the computer.</param>
+    private async Task DeletePhotosAsync(List<PhotoItem> photos, bool confirmed = false)
     {
         if (photos.Count == 0)
             return;
@@ -244,7 +245,7 @@ public sealed partial class MainWindow
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Content.XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (!confirmed && await dialog.ShowAsync() != ContentDialogResult.Primary)
             return;
 
         var deleted = await Task.Run(() => photos.Where(MoveToRecycleBin).ToList());
@@ -254,6 +255,7 @@ public sealed partial class MainWindow
         foreach (var photo in deleted)
             _visible.Remove(photo);
         UpdateCounter();
+        PublishRemotePhotos();
 
         if (InLoupe)
         {

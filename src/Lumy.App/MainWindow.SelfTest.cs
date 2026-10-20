@@ -1,4 +1,5 @@
 using Lumy.Core;
+using Lumy.Remote;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using Windows.Foundation;
@@ -140,6 +141,8 @@ public sealed partial class MainWindow
                 Check(!InTournament, "tournament closes");
             }
 
+            await RunRemoteChecksAsync(Check);
+
             Check(_settings.RecentFolders.FirstOrDefault() == folder, "folder is first in recent folders");
             Check(FilterBar.Items[0].Text.EndsWith(_all.Count.ToString(), StringComparison.Ordinal), $"filters show counts ({FilterBar.Items[0].Text})");
 
@@ -157,6 +160,62 @@ public sealed partial class MainWindow
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(report)!);
         await File.WriteAllLinesAsync(report, lines);
         Environment.Exit(failures == 0 ? 0 : 1);
+    }
+
+    /// <summary>Drives Lumy the way the phone does, through the same commands, and reads back what the phone would show.</summary>
+    private async Task RunRemoteChecksAsync(Action<bool, string> check)
+    {
+        void Send(RemoteCommand command, string? arg = null) => HandleRemoteCommand(new RemoteRequest(command, arg));
+        static string Text(long n) => n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        Send(RemoteCommand.Filter, nameof(TierFilter.Unrated));
+        await Task.Delay(300);
+        check(CurrentFilter == TierFilter.Unrated && CurrentRemoteState().Filter == "Unrated", "phone: filter switches");
+        Send(RemoteCommand.Filter, nameof(TierFilter.All));
+        await Task.Delay(300);
+
+        Send(RemoteCommand.Goto, Text(_visible[4].Id));
+        Send(RemoteCommand.Open);
+        await Task.Delay(800);
+        check(InLoupe && _loupeIndex == 4 && CurrentRemoteState() is { Mode: "loupe" } loupe && loupe.PhotoId == _visible[4].Id, "phone: grid tap opens that photo");
+        Send(RemoteCommand.Back);
+
+        Send(RemoteCommand.Compare, string.Join(',', _visible.Take(3).Select(p => Text(p.Id))));
+        await Task.Delay(1000);
+        check(InCompare && CurrentRemoteState() is { Mode: "compare", Photos.Count: 3 }, "phone: compares the photos it picked");
+        Send(RemoteCommand.Pick, "1");
+        Send(RemoteCommand.SuperLike);
+        check(_compareCells.Count == 3 && _compareCells[1].Photo.Tier == Tier.SuperLike && CurrentRemoteState().Focus == 1, "phone: rates the photo it points at in compare");
+        Send(RemoteCommand.Undo);
+        Send(RemoteCommand.Back);
+        await Task.Delay(300);
+
+        Send(RemoteCommand.Tournament, "shown:3");
+        await Task.Delay(500);
+        var duels = 0;
+        var sawDuel = false;
+        while (InTournament && TournamentResult.Visibility != Visibility.Visible && duels < 2000)
+        {
+            if (_duelAnswer is not null)
+            {
+                sawDuel |= CurrentRemoteState() is { Mode: "tournament", Photos.Count: 2 };
+                Send(RemoteCommand.Pick, Text(duels % 2));
+                duels++;
+            }
+
+            await Task.Delay(20);
+        }
+
+        check(sawDuel, "phone: sees both photos of a duel");
+        check(CurrentRemoteState() is { Mode: "tournament-done", Photos.Count: 3 }, $"phone: runs a tournament to its top 3 ({duels} duels)");
+        Send(RemoteCommand.Back);
+        await Task.Delay(300);
+        check(!InTournament, "phone: leaves the tournament");
+
+        var before = _settings.AutoAdvance;
+        Send(RemoteCommand.AutoAdvance);
+        check(CurrentRemoteState().AutoAdvance != before, "phone: toggles auto-advance");
+        Send(RemoteCommand.AutoAdvance);
     }
 
     /// <summary>The photo has the same gap on its left and right inside the viewer.</summary>

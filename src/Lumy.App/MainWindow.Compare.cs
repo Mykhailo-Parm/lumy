@@ -271,11 +271,7 @@ public sealed partial class MainWindow
             Root.Children.Add(Scroll);
             Root.Children.Add(label);
             Root.BorderThickness = new Thickness(2);
-            Root.PointerEntered += (_, _) =>
-            {
-                _owner._hoveredCell = this;
-                Root.BorderBrush = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
-            };
+            Root.PointerEntered += (_, _) => Point();
             Root.PointerExited += (_, _) =>
             {
                 if (_owner._hoveredCell == this)
@@ -286,6 +282,15 @@ public sealed partial class MainWindow
         }
 
         public PhotoItem Photo { get; }
+
+        /// <summary>Makes this the photo F, R, X and 0 rate: under the mouse, or picked on the phone.</summary>
+        public void Point()
+        {
+            if (_owner._hoveredCell is { } previous && previous != this)
+                previous.Root.BorderBrush = null;
+            _owner._hoveredCell = this;
+            Root.BorderBrush = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
+        }
 
         public Grid Root { get; }
 

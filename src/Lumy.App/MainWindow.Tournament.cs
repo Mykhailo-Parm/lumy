@@ -365,7 +365,9 @@ public sealed partial class MainWindow
         image.Source = await PhotoItem.LoadCachedThumbnailAsync(_thumbnails, photo.Record);
     }
 
-    private void TournamentSuperLike_Click(object sender, RoutedEventArgs e)
+    private void TournamentSuperLike_Click(object sender, RoutedEventArgs e) => SuperLikeWinners();
+
+    private void SuperLikeWinners()
     {
         _ratings.Rate(_tournamentWinners.ToList(), Tier.SuperLike);
         UpdateCounter();
@@ -375,14 +377,18 @@ public sealed partial class MainWindow
     private void TournamentCopy_Click(object sender, RoutedEventArgs e) =>
         _ = CopyPhotosAsync(_tournamentWinners.ToList(), pathsOnly: false);
 
-    private async void TournamentCompare_Click(object sender, RoutedEventArgs e)
+    private void TournamentCompare_Click(object sender, RoutedEventArgs e) => _ = CompareWinnersAsync();
+
+    private async Task CompareWinnersAsync()
     {
         var winners = _tournamentWinners.ToList();
         await CloseTournamentAsync(ask: false);
         ComparePhotos(winners);
     }
 
-    private async void TournamentShow_Click(object sender, RoutedEventArgs e)
+    private void TournamentShow_Click(object sender, RoutedEventArgs e) => _ = ShowWinnersAsync();
+
+    private async Task ShowWinnersAsync()
     {
         var winners = _tournamentWinners.ToList();
         await CloseTournamentAsync(ask: false);

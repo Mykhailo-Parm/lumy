@@ -143,7 +143,7 @@ public sealed partial class MainWindow : Window
             _galleryThumbnails.ReleaseAll();
             _filmstripThumbnails.ReleaseAll();
             _all = records.Select(r => new PhotoItem(r)).ToList();
-            _remotePaths = _all.ToDictionary(p => p.Id, p => p.Path);
+            _remoteRecords = _all.ToDictionary(p => p.Id, p => p.Record);
             ApplyFilter();
             RestoreLastPhoto(folder);
             _ = DetectSeriesAsync(_all);
@@ -194,6 +194,7 @@ public sealed partial class MainWindow : Window
         ApplyThumbnailSize();
         if (_visible.Count > 0)
             Gallery.SelectedIndex = 0;
+        PublishRemotePhotos();
     }
 
     private void FilterBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args) => ApplyFilter();
@@ -425,6 +426,7 @@ public sealed partial class MainWindow : Window
     {
         var full = AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
         AppWindow.SetPresenter(full ? AppWindowPresenterKind.Default : AppWindowPresenterKind.FullScreen);
+        PushRemoteState();
     }
 
     // ---------- Rating ----------
@@ -640,5 +642,10 @@ public sealed partial class MainWindow : Window
         Toast.Opacity = 1;
         _toastTimer.Stop();
         _toastTimer.Start();
+
+        // The phone shows the same message, so a hint like "select 2–9 photos" reaches whoever holds it.
+        _remoteMessage = text;
+        _remoteMessageId++;
+        PushRemoteState();
     }
 }

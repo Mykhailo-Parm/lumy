@@ -16,7 +16,12 @@ namespace Lumy.Remote;
 /// keeps a WebSocket open, sends commands and receives what Lumy is showing. Every request must carry the
 /// pairing token from the QR code, so other devices on the network cannot drive Lumy or see photos.
 /// </summary>
-public sealed class RemoteServer(string token, Func<long, CancellationToken, Task<RemoteImage?>> preview) : IAsyncDisposable
+/// <param name="preview">A large image of a photo for the main view.</param>
+/// <param name="thumbnail">A small one for grids; falls back to <paramref name="preview"/>.</param>
+public sealed class RemoteServer(
+    string token,
+    Func<long, CancellationToken, Task<RemoteImage?>> preview,
+    Func<long, CancellationToken, Task<RemoteImage?>>? thumbnail = null) : IAsyncDisposable
 {
     public const int DefaultPort = 8765;
 
@@ -29,9 +34,10 @@ public sealed class RemoteServer(string token, Func<long, CancellationToken, Tas
     private readonly byte[] _token = Encoding.UTF8.GetBytes(token);
     private WebApplication? _app;
     private RemoteState _state = RemoteState.Empty;
+    private RemotePhotoList _photos = RemotePhotoList.Empty;
 
     /// <summary>Raised on a thread-pool thread for every valid command a phone sends.</summary>
-    public event Action<RemoteCommand>? CommandReceived;
+    public event Action<RemoteRequest>? CommandReceived;
 
     /// <summary>Raised when a phone connects or disconnects, with the number now connected.</summary>
     public event Action<int>? ClientsChanged;
@@ -104,6 +110,9 @@ public sealed class RemoteServer(string token, Func<long, CancellationToken, Tas
             _ = client.SendAsync(message);
     }
 
+    /// <summary>Replaces the photo list the phone's grid shows; the state's <see cref="RemoteState.ListVersion"/> should match.</summary>
+    public void PublishPhotos(RemotePhotoList photos) => _photos = photos;
+
     public ValueTask DisposeAsync() => new(StopAsync());
 
     private WebApplication Build(int port, bool localOnly)
@@ -134,7 +143,9 @@ public sealed class RemoteServer(string token, Func<long, CancellationToken, Tas
         });
 
         app.MapGet("/", ServePage);
-        app.MapGet("/preview/{id:long}", ServePreview);
+        app.MapGet("/preview/{id:long}", (HttpContext context, long id) => ServeImage(context, id, preview));
+        app.MapGet("/thumb/{id:long}", (HttpContext context, long id) => ServeImage(context, id, thumbnail ?? preview));
+        app.MapGet("/photos", ServePhotos);
         app.Map("/ws", HandleSocket);
         return app;
     }
@@ -154,9 +165,16 @@ public sealed class RemoteServer(string token, Func<long, CancellationToken, Tas
         await page.CopyToAsync(context.Response.Body);
     }
 
-    private async Task ServePreview(HttpContext context, long id)
+    private async Task ServePhotos(HttpContext context)
     {
-        var image = await preview(id, context.RequestAborted);
+        context.Response.ContentType = "application/json; charset=utf-8";
+        context.Response.Headers.CacheControl = "no-store";
+        await context.Response.Body.WriteAsync(JsonSerializer.SerializeToUtf8Bytes(_photos, Json), context.RequestAborted);
+    }
+
+    private static async Task ServeImage(HttpContext context, long id, Func<long, CancellationToken, Task<RemoteImage?>> source)
+    {
+        var image = await source(id, context.RequestAborted);
         if (image is null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -208,14 +226,26 @@ public sealed class RemoteServer(string token, Func<long, CancellationToken, Tas
         }
     }
 
-    private static RemoteCommand? ParseCommand(ReadOnlySpan<byte> json)
+    private static RemoteRequest? ParseCommand(ReadOnlySpan<byte> json)
     {
         try
         {
             using var document = JsonDocument.Parse(json.ToArray());
-            return document.RootElement.TryGetProperty("cmd", out var cmd) && RemoteCommands.TryParse(cmd.GetString(), out var command)
-                ? command
-                : null;
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("cmd", out var cmd) || cmd.ValueKind != JsonValueKind.String
+                || !RemoteCommands.TryParse(cmd.GetString(), out var command))
+                return null;
+
+            string? arg = null;
+            if (root.TryGetProperty("arg", out var value))
+                arg = value.ValueKind switch
+                {
+                    JsonValueKind.String => value.GetString(),
+                    JsonValueKind.Number => value.GetRawText(),
+                    _ => null,
+                };
+            return new RemoteRequest(command, arg);
         }
         catch (JsonException)
         {

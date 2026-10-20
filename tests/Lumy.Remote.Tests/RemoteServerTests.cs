@@ -85,14 +85,14 @@ public sealed class RemoteServerTests : IAsyncLifetime
     [Fact]
     public async Task Socket_commands_raise_CommandReceived_and_junk_is_ignored()
     {
-        var received = new List<RemoteCommand>();
+        var received = new List<RemoteRequest>();
         var gotTwo = new TaskCompletionSource();
         _server.CommandReceived += c =>
         {
             lock (received)
             {
                 received.Add(c);
-                if (received.Count == 2)
+                if (received.Count == 3)
                     gotTwo.TrySetResult();
             }
         };
@@ -104,8 +104,24 @@ public sealed class RemoteServerTests : IAsyncLifetime
         await SendAsync(socket, """{"cmd":"format-disk"}""");
         await SendAsync(socket, """{"cmd":"swipe"}""");
 
+        await SendAsync(socket, """{"cmd":"goto","arg":42}""");
+
         await gotTwo.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal([RemoteCommand.Like, RemoteCommand.StartSwipe], received);
+        Assert.Equal([new RemoteRequest(RemoteCommand.Like), new RemoteRequest(RemoteCommand.StartSwipe), new RemoteRequest(RemoteCommand.Goto, "42")], received);
+    }
+
+    [Fact]
+    public async Task Serves_the_photo_list_and_thumbnails()
+    {
+        _server.PublishPhotos(new RemotePhotoList(3, [new RemotePhoto(7, "a.jpg", Tier.Like), new RemotePhoto(8, "b.jpg", Tier.None)]));
+        var list = JsonDocument.Parse(await _http.GetStringAsync($"/photos?t={Token}")).RootElement;
+        Assert.Equal(3, list.GetProperty("version").GetInt32());
+        Assert.Equal(2, list.GetProperty("photos").GetArrayLength());
+        Assert.Equal("like", list.GetProperty("photos")[0].GetProperty("tier").GetString());
+
+        var thumb = await _http.GetAsync($"/thumb/7?t={Token}");
+        Assert.Equal(HttpStatusCode.OK, thumb.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _http.GetAsync("/photos")).StatusCode);
     }
 
     [Fact]
