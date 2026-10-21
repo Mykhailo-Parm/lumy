@@ -16,7 +16,7 @@
         <!-- Title bar: the window draws its own so the app reads as one surface on Mica. -->
         <Grid x:Name="AppTitleBar" Grid.Row="0" Padding="16,0,140,0">
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <FontIcon Glyph="&#xEB9F;" FontSize="16" Foreground="{StaticResource SuperLikeBrush}" />
+                <Image x:Name="TitleIcon" Width="18" Height="18" />
                 <TextBlock Text="Lumy" Style="{StaticResource BodyStrongTextBlockStyle}" />
                 <TextBlock x:Name="FolderTitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
             </StackPanel>
@@ -205,7 +205,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
                     <Button x:Name="LoupeRejectButton" Click="LoupeReject_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Отказ (X). Ещё раз, чтобы снять">
-                        <FontIcon x:Name="LoupeRejectIcon" Glyph="&#xE711;" FontSize="18" />
+                        <FontIcon x:Name="LoupeRejectIcon" Glyph="&#xE8E0;" FontSize="18" />
                     </Button>
                     <Button x:Name="LoupeLikeButton" Click="LoupeLike_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Лайк (F или 1). Ещё раз, чтобы снять">
                         <FontIcon x:Name="LoupeLikeIcon" Glyph="&#xEB51;" FontSize="18" />
@@ -325,10 +325,14 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="Свайп" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock Grid.Column="0" Text="Свайп" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
                 <ProgressBar x:Name="SwipeProgressBar" Grid.Column="1" VerticalAlignment="Center" Minimum="0" />
-                <TextBlock x:Name="SwipeProgressText" Grid.Column="2" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="SwipeProgressText" Grid.Column="2" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button Grid.Column="3" Click="SwipeClose_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Выйти из свайпа (Esc)">
+                    <FontIcon Glyph="&#xE8BB;" FontSize="14" />
+                </Button>
             </Grid>
 
             <Grid x:Name="SwipeStage" Grid.Row="1" Margin="24,0">
@@ -365,7 +369,7 @@
                     <FontIcon Glyph="&#xE7A7;" FontSize="16" />
                 </Button>
                 <Button Click="SwipeReject_Click" ToolTipService.ToolTip="Отказ (←), Shift+← вся серия" Width="64" Height="64" CornerRadius="32">
-                    <FontIcon Glyph="&#xE711;" FontSize="22" Foreground="{StaticResource RejectBrush}" />
+                    <FontIcon Glyph="&#xE8E0;" FontSize="22" Foreground="{StaticResource RejectBrush}" />
                 </Button>
                 <Button Click="SwipeSkip_Click" ToolTipService.ToolTip="Решу потом (↓)" Width="48" Height="48" CornerRadius="24">
                     <FontIcon Glyph="&#xE74B;" FontSize="16" />
@@ -390,9 +394,13 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="Сравнение" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock x:Name="CompareInfo" Grid.Column="1" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="0" Text="Сравнение" VerticalAlignment="Center" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock x:Name="CompareInfo" Grid.Column="1" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button Grid.Column="2" Click="CompareClose_Click" Style="{StaticResource LoupeIconButtonStyle}" ToolTipService.ToolTip="Выйти из сравнения (Esc)">
+                    <FontIcon Glyph="&#xE8BB;" FontSize="14" />
+                </Button>
             </Grid>
             <Grid x:Name="CompareGrid" Grid.Row="1" Margin="8,0" SizeChanged="CompareGrid_SizeChanged" />
 
@@ -421,8 +429,8 @@
                     <Slider x:Name="OverlaySlider" Width="260" Minimum="0" Maximum="1" StepFrequency="0.01" VerticalAlignment="Center" ValueChanged="OverlaySlider_ValueChanged" />
                     <Button Content="Поменять местами" Click="OverlaySwap_Click" />
                 </StackPanel>
-                <TextBlock x:Name="CompareHint" HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                           Text="Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ  ·  1–9 убрать из сравнения  ·  Ctrl+колесо зум  ·  L синхронизация  ·  O наложение  ·  Esc назад" />
+                <TextBlock x:Name="CompareHint" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="16,0" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           Text="Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ (ещё раз — снять)  ·  1–9 убрать  ·  двойной клик или Ctrl+колесо — зум, мышью — сдвиг  ·  L синхронно  ·  O наложение  ·  Esc назад" />
             </StackPanel>
         </Grid>
 
@@ -492,7 +500,7 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <TextBlock x:Name="TournamentHint" Grid.Row="2" HorizontalAlignment="Center" Margin="0,8,0,14" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+            <TextBlock x:Name="TournamentHint" Grid.Row="2" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" Margin="16,8,16,14" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                        Text="← или 1 — левое лучше  ·  → или 2 — правое лучше  ·  клик по фото тоже выбирает  ·  Backspace назад  ·  Esc выйти" />
         </Grid>
 

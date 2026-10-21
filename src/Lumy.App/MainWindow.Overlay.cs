@@ -14,7 +14,7 @@ namespace Lumy.App;
 /// </summary>
 public sealed partial class MainWindow
 {
-    private const string CompareGridHint = "Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ  ·  1–9 убрать из сравнения  ·  Ctrl+колесо зум  ·  L синхронизация  ·  O наложение  ·  Esc назад";
+    private const string CompareGridHint = "Наведи на фото: F лайк  ·  R суперлайк  ·  X отказ (ещё раз — снять)  ·  1–9 убрать  ·  двойной клик или Ctrl+колесо — зум, мышью — сдвиг  ·  L синхронно  ·  O наложение  ·  Esc назад";
     private const string OverlayHint = "Тяни шторку мышью  ·  колесо или ← → тоже  ·  M шторка / прозрачность  ·  S поменять местами  ·  F R X оценивают фото под мышью  ·  O или Esc — к сетке";
 
     private CompareCell? _overlayLeft;

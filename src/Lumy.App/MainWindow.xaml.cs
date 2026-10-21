@@ -56,6 +56,12 @@ public sealed partial class MainWindow : Window
         var screenWidth = DisplayArea.Primary?.OuterBounds.Width ?? 2560;
         _loupeCache = new LoupeImageCache(Math.Clamp(screenWidth, 1920, 3840));
 
+        var icon = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Lumy.ico");
+        if (File.Exists(icon))
+            AppWindow.SetIcon(icon);
+        var logo = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Lumy.png");
+        if (File.Exists(logo))
+            TitleIcon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(logo));
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -262,7 +268,7 @@ public sealed partial class MainWindow : Window
 
         var unrated = _all.Count - likes - supers - rejected;
         UpdateFilterCounts(likes, supers, rejected, unrated);
-        CounterText.Text = $"Отобрано {likes + supers} из {_all.Count}  ·  ★ {supers}  ·  ♥ {likes}  ·  ✕ {rejected}  ·  без оценки {unrated}";
+        CounterText.Text = $"Отобрано {likes + supers} из {_all.Count}  ·  ★ {supers}  ·  ♥ {likes}  ·  👎 {rejected}  ·  без оценки {unrated}";
     }
 
     // ---------- Gallery ----------
@@ -465,6 +471,7 @@ public sealed partial class MainWindow : Window
         if (targets.Count == 0)
             return;
 
+        tier = Toggled(targets, tier);
         _ratings.Rate(targets, tier);
         UpdateCounter();
 
@@ -483,6 +490,10 @@ public sealed partial class MainWindow : Window
             Gallery.ScrollIntoView(Gallery.SelectedItem);
         }
     }
+
+    /// <summary>Pressing the rating the photos already have takes it off again, like the buttons in the viewer.</summary>
+    private static Tier Toggled(IReadOnlyCollection<PhotoItem> photos, Tier tier) =>
+        tier != Tier.None && photos.Count > 0 && photos.All(p => p.Tier == tier) ? Tier.None : tier;
 
     private void UndoOrRedo(bool redo)
     {
@@ -615,7 +626,7 @@ public sealed partial class MainWindow : Window
             ("1  или  F", "Лайк"),
             ("2  или  R", "Суперлайк"),
             ("X", "Отказ"),
-            ("0", "Снять оценку"),
+            ("0", "Снять оценку (или нажать ту же оценку ещё раз)"),
             ("Ctrl+Z / Ctrl+Y", "Отменить / вернуть"),
             ("Ctrl + 0 / 1 / 2 / 3 / 4", "Все / Лайки / Суперлайки / Без оценки / Отклонённые"),
             ("Enter / Esc", "Открыть на весь экран / назад в галерею"),
@@ -630,6 +641,7 @@ public sealed partial class MainWindow : Window
             ("Shift + ← (в свайпе)", "Отклонить всю серию похожих кадров"),
             ("C", "Сравнить выделенные фото или всю серию текущего фото"),
             ("1–9 (в сравнении)", "Убрать фото из сравнения; F / R / X оценивают фото под мышью"),
+            ("Двойной клик, перетаскивание (в сравнении)", "Зум и сдвиг увеличенных фото, все кадры двигаются вместе"),
             ("Shift / Ctrl + клик в ленте", "Выбрать фото для сравнения, не меняя открытое; C — сравнить"),
             ("O (в сравнении)", "Наложить два фото друг на друга: шторка за мышью, M — прозрачность, S — поменять местами"),
             ("B", "Турнир: выбрать лучшие N фото попарно (← → выбор, Backspace назад)"),
@@ -640,7 +652,7 @@ public sealed partial class MainWindow : Window
             ("`", "Автопереход после оценки вкл/выкл"),
             ("Ctrl+O", "Открыть папку"),
             ("Ctrl + колесо", "Размер миниатюр"),
-            ("Кнопка «Телефон»", "Пульт: листать и оценивать с телефона по QR-коду"),
+            ("Кнопка «Телефон»", "Пульт по QR-коду: листать, оценивать, приближать фото двумя пальцами"),
         ];
 
         var grid = new Grid { ColumnSpacing = 24, RowSpacing = 8 };

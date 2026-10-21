@@ -158,7 +158,7 @@ public sealed class PhotoItem(PhotoRecord record) : IRatedPhoto, INotifyProperty
     {
         Tier.Like => "\uEB52",      // HeartFill
         Tier.SuperLike => "\uE735", // FavoriteStarFill
-        Tier.Rejected => "\uE711",  // Cancel
+        Tier.Rejected => "\uE8E0",  // Dislike: a thumb down, so it never reads as "close"
         _ => "",
     };
 

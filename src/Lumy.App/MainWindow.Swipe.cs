@@ -191,7 +191,7 @@ public sealed partial class MainWindow
         SwipeProgressBar.Value = session.IsFinished ? session.Total : session.Position - 1;
         SwipeProgressText.Text = session.IsFinished
             ? $"{session.Total} / {session.Total}"
-            : $"{session.Position} / {session.Total}  ·  ♥ {session.Liked}  ·  ★ {session.SuperLiked}  ·  ✕ {session.Rejected}";
+            : $"{session.Position} / {session.Total}  ·  ♥ {session.Liked}  ·  ★ {session.SuperLiked}  ·  👎 {session.Rejected}";
         SwipeSeriesText.Text = session.Current is { SeriesSize: > 1 } p
             ? $"Серия: кадр {p.SeriesPosition} из {p.SeriesSize}  ·  Shift+← отклонить всю серию"
             : "";
@@ -205,7 +205,7 @@ public sealed partial class MainWindow
         SwipeCard.Visibility = Visibility.Collapsed;
         SwipeNextImage.Visibility = Visibility.Collapsed;
         SwipeSeriesText.Text = "";
-        SwipeSummaryText.Text = $"♥ {session.Liked} лайков  ·  ★ {session.SuperLiked} суперлайков  ·  ✕ {session.Rejected} отклонено"
+        SwipeSummaryText.Text = $"♥ {session.Liked} лайков  ·  ★ {session.SuperLiked} суперлайков  ·  👎 {session.Rejected} отклонено"
             + (session.Skipped > 0 ? $"  ·  {session.Skipped} без решения" : "");
         SwipeSummary.Visibility = Visibility.Visible;
     }

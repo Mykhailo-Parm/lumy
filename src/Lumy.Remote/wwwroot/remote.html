@@ -130,7 +130,7 @@
     <button class="big" data-cmd="pick" data-arg="1" id="rightBtn">Правое ▶</button>
   </div>
   <div class="row" id="rateRow">
-    <button class="big reject" data-cmd="reject" aria-label="Отказ">✕</button>
+    <button class="big reject" data-cmd="reject" aria-label="Отказ">👎</button>
     <button class="big super" data-cmd="super" aria-label="Суперлайк">★</button>
     <button class="big like" data-cmd="like" aria-label="Лайк">♥</button>
   </div>
@@ -265,7 +265,7 @@
   const token = new URLSearchParams(location.search).get('t') || '';
   const q = `t=${encodeURIComponent(token)}`;
   const $ = id => document.getElementById(id);
-  const glyph = { like: '♥', superLike: '★', rejected: '✕', none: '' };
+  const glyph = { like: '♥', superLike: '★', rejected: '👎', none: '' };
   const tierClass = { like: 'like', superLike: 'super', rejected: 'reject', none: '' };
   const modeName = { empty: 'нет фото', gallery: 'галерея', loupe: 'просмотр', swipe: 'свайп', 'swipe-done': 'свайп завершён',
     compare: 'сравнение', tournament: 'турнир', 'tournament-done': 'итоги турнира', editor: 'кроп и цвет' };
@@ -314,7 +314,7 @@
     $('folder').textContent = s.album ? `Альбом: ${s.album.name}` : (s.folder || 'Lumy');
 
     $('empty').style.display = (s.photoId == null && !(multi && s.photos.length)) ? 'flex' : 'none';
-    $('empty').textContent = m === 'swipe-done' ? `Готово: ♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}`
+    $('empty').textContent = m === 'swipe-done' ? `Готово: ♥ ${s.liked} · ★ ${s.superLiked} · 👎 ${s.rejected}`
       : m === 'gallery' && !s.total ? 'В этом фильтре нет фото. Откройте меню ☰, чтобы выбрать другой'
       : !s.folder ? 'Откройте папку: меню ☰ → Папки' : 'Нет фото';
     $('photo').style.display = multi ? 'none' : '';
@@ -326,7 +326,7 @@
     $('tier').textContent = glyph[(focused || s).tier] || '';
     $('tier').className = tierClass[(focused || s).tier] || '';
     $('pos').textContent = compare ? `${s.photos.length} фото` : done ? `топ ${s.photos.length}` : duel ? `дуэль ${s.position} из ~${s.total}` : s.total ? `${s.position || '–'} / ${s.total}` : '';
-    $('detail').textContent = swipe ? `♥ ${s.liked} · ★ ${s.superLiked} · ✕ ${s.rejected}${s.detail ? ' · ' + s.detail : ''}` : (s.detail || '');
+    $('detail').textContent = swipe ? `♥ ${s.liked} · ★ ${s.superLiked} · 👎 ${s.rejected}${s.detail ? ' · ' + s.detail : ''}` : (s.detail || '');
 
     $('duelRow').hidden = !duel;
     $('winnersRow').hidden = !done;
@@ -357,14 +357,14 @@
       : compare && s.overlay ? (s.overlay === 'wipe' ? 'Двигай ползунок: шторка между двумя фото' : 'Двигай ползунок: сколько видно верхнего фото')
       : swipe ? 'По фото: → лайк · ↑ суперлайк · ← отказ · ↓ потом'
       : duel ? 'Нажмите на фото, которое лучше' : compare ? (focused ? 'Оценка применяется к выбранному фото' : 'Нажмите на фото, чтобы выбрать его')
-      : done ? 'Нажмите на фото, чтобы открыть его на компьютере' : (m === 'gallery' || m === 'loupe') ? 'По фото: ← → листать' : '';
+      : done ? 'Нажмите на фото, чтобы открыть его на компьютере' : (m === 'gallery' || m === 'loupe') ? 'По фото: ← → листать · двумя пальцами — зум, двойной тап — 3×' : '';
 
     if (editor && s.editor && s.editor.info) $('detail').textContent = s.editor.info;
     if (!multi && s.photoId !== shownId) {
       shownId = s.photoId;
       const img = $('photo');
       img.classList.add('dragging');
-      img.style.transform = ''; img.style.opacity = '1';
+      img.style.transform = ''; img.style.opacity = '1'; resetView();
       if (s.photoId != null) img.src = `/preview/${s.photoId}?${q}`; else img.removeAttribute('src');
       requestAnimationFrame(() => img.classList.remove('dragging'));
     }
@@ -532,15 +532,74 @@
   let start = null;
   let cropDrag = null;
   img.addEventListener('load', () => drawCrop());
+
+  // Pinch and drag to look closer: the phone zooms its own preview at once and the computer shows the same
+  // part of the photo at full resolution. view.x and view.y are the point of the photo in the middle, in fractions.
+  let view = { zoom: 1, x: 0.5, y: 0.5 }, pinch = null, pan = null, viewTimer, lastTap = 0;
+  const touches = new Map();
+  const capture = e => { try { stage.setPointerCapture(e.pointerId); } catch { } };
+  const zoomable = () => state.mode === 'loupe' || state.mode === 'gallery';
+
+  function clampView() {
+    view.zoom = Math.min(8, Math.max(1, view.zoom));
+    const half = 0.5 / view.zoom;
+    view.x = Math.min(1 - half, Math.max(half, view.x));
+    view.y = Math.min(1 - half, Math.max(half, view.y));
+  }
+
+  function applyView(sendIt) {
+    clampView();
+    const w = img.offsetWidth, h = img.offsetHeight;
+    img.style.transform = view.zoom > 1.01
+      ? `translate(${(0.5 - view.x) * w * view.zoom}px, ${(0.5 - view.y) * h * view.zoom}px) scale(${view.zoom})` : '';
+    if (!sendIt) return;
+    clearTimeout(viewTimer);
+    viewTimer = setTimeout(() => send('view', `${view.zoom.toFixed(3)}:${view.x.toFixed(4)}:${view.y.toFixed(4)}`), 50);
+  }
+
+  function resetView() { view = { zoom: 1, x: 0.5, y: 0.5 }; pinch = null; pan = null; }
+
+  const distance = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  const middle = () => { const [a, b] = [...touches.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+
   stage.addEventListener('pointerdown', e => {
     if (state.mode === 'editor') {
-      cropDrag = { x: e.clientX, y: e.clientY }; stage.setPointerCapture(e.pointerId); return;
+      cropDrag = { x: e.clientX, y: e.clientY }; capture(e); return;
     }
     if (!$('multi').hidden) return;
-    start = { x: e.clientX, y: e.clientY }; img.classList.add('dragging'); stage.setPointerCapture(e.pointerId);
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    capture(e);
+    if (zoomable() && touches.size === 2) {
+      // A second finger turns the swipe into a pinch.
+      start = null; hint.style.opacity = 0; img.classList.add('dragging');
+      pinch = { distance: distance(), middle: middle(), view: { ...view } };
+      applyView(false);
+      return;
+    }
+    if (touches.size > 1) return;
+    if (zoomable() && view.zoom > 1.01) {
+      pan = { x: e.clientX, y: e.clientY, view: { ...view } }; img.classList.add('dragging'); return;
+    }
+    start = { x: e.clientX, y: e.clientY }; img.classList.add('dragging');
   });
   stage.addEventListener('pointermove', e => {
     if (cropDrag) { drawCrop(e.clientX - cropDrag.x, e.clientY - cropDrag.y); return; }
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const w = img.offsetWidth || 1, h = img.offsetHeight || 1;
+    if (pinch && touches.size === 2) {
+      const m = middle();
+      view.zoom = pinch.view.zoom * distance() / Math.max(pinch.distance, 1);
+      view.x = pinch.view.x - (m.x - pinch.middle.x) / (w * view.zoom);
+      view.y = pinch.view.y - (m.y - pinch.middle.y) / (h * view.zoom);
+      applyView(true);
+      return;
+    }
+    if (pan) {
+      view.x = pan.view.x - (e.clientX - pan.x) / (w * view.zoom);
+      view.y = pan.view.y - (e.clientY - pan.y) / (h * view.zoom);
+      applyView(true);
+      return;
+    }
     if (!start) return;
     const dx = e.clientX - start.x, dy = e.clientY - start.y;
     img.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 20}deg)`;
@@ -556,6 +615,17 @@
       else drawCrop();
       return;
     }
+    touches.delete(e.pointerId);
+    if (pinch) {
+      if (touches.size === 0) { pinch = null; img.classList.remove('dragging'); if (view.zoom <= 1.05) { resetView(); applyView(true); } }
+      return;
+    }
+    if (pan) {
+      const moved = Math.abs(e.clientX - pan.x) + Math.abs(e.clientY - pan.y);
+      pan = null; img.classList.remove('dragging');
+      if (moved < 8) doubleTap(e);
+      return;
+    }
     if (!start) return;
     const dx = e.clientX - start.x, dy = e.clientY - start.y;
     start = null; img.classList.remove('dragging'); hint.style.opacity = 0;
@@ -567,11 +637,26 @@
       if (state.mode !== 'swipe') setTimeout(() => { img.style.transform = ''; }, 120);
     } else {
       img.style.transform = '';
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && state.mode === 'gallery') send('open');
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8 && !doubleTap(e) && state.mode === 'gallery') send('open');
     }
   };
   stage.addEventListener('pointerup', end);
   stage.addEventListener('pointercancel', end);
+
+  /// A double tap zooms 3x on that spot, or back out; returns true when it was one.
+  function doubleTap(e) {
+    if (!zoomable()) return false;
+    const now = Date.now(), twice = now - lastTap < 320;
+    lastTap = twice ? 0 : now;
+    if (!twice) return false;
+    if (view.zoom > 1.01) resetView();
+    else {
+      const r = img.getBoundingClientRect();
+      view = { zoom: 3, x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+    }
+    applyView(true);
+    return true;
+  }
 
   function intent(dx, dy) {
     const w = stage.clientWidth * 0.25, h = stage.clientHeight * 0.18;
@@ -579,7 +664,7 @@
     if (Math.abs(x) < 0.15 && Math.abs(y) < 0.15) return null;
     const swipe = state.mode === 'swipe';
     if (Math.abs(x) >= Math.abs(y)) {
-      if (swipe) return x > 0 ? { cmd: 'like', icon: '♥', strength: x } : { cmd: 'reject', icon: '✕', strength: -x };
+      if (swipe) return x > 0 ? { cmd: 'like', icon: '♥', strength: x } : { cmd: 'reject', icon: '👎', strength: -x };
       return x > 0 ? { cmd: 'prev', icon: '‹', strength: x } : { cmd: 'next', icon: '›', strength: -x };
     }
     if (!swipe) return null;

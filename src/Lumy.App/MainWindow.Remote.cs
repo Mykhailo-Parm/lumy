@@ -412,6 +412,9 @@ public sealed partial class MainWindow
             case RemoteCommand.Open when !InLoupe: OpenLoupe(Math.Max(Gallery.SelectedIndex, 0)); break;
             case RemoteCommand.Back: CloseLoupe(); break;
             case RemoteCommand.Zoom when InLoupe: _ = ToggleZoomAsync(); break;
+            case RemoteCommand.View when request.Values() is [var zoom, var x, var y] && !double.IsNaN(zoom + x + y):
+                _ = RemoteViewAsync(zoom, x, y);
+                break;
             case RemoteCommand.StartSwipe: StartSwipe(); break;
             case RemoteCommand.Filmstrip when InLoupe: ToggleFilmstrip(); break;
             case RemoteCommand.Goto when request.Numbers() is [var id]: RemoteGoto(id); break;

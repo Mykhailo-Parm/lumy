@@ -145,6 +145,7 @@ public sealed partial class MainWindow
             await RunEditorChecksAsync(Check);
             await RunAlbumChecksAsync(Check);
             await RunOverlayChecksAsync(Check);
+            await RunFeedbackChecksAsync(Check);
 
             Check(_settings.RecentFolders.FirstOrDefault() == folder, "folder is first in recent folders");
             Check(FilterBar.Items[0].Text.EndsWith(_all.Count.ToString(), StringComparison.Ordinal), $"filters show counts ({FilterBar.Items[0].Text})");
@@ -381,6 +382,50 @@ public sealed partial class MainWindow
         SendRemote(RemoteCommand.Back);
         await Task.Delay(500);
         check(!InCompare && !InOverlay, "phone: leaves the comparison");
+    }
+
+    /// <summary>Fixes from trying v0.6: toggled ratings, zoom and pan in comparison, the exit button, zoom from the phone, the icon.</summary>
+    private async Task RunFeedbackChecksAsync(Action<bool, string> check)
+    {
+        SetFilter(TierFilter.All);
+        await Task.Delay(300);
+        var autoAdvance = _settings.AutoAdvance;
+        _settings.AutoAdvance = false;
+        Gallery.SelectedItems.Clear();
+        Gallery.SelectedIndex = 5;
+        var photo = _visible[5];
+        Rate(Tier.Like);
+        var liked = photo.Tier == Tier.Like;
+        Rate(Tier.Like);
+        check(liked && photo.Tier == Tier.None, "pressing like again takes it off");
+        SendRemote(RemoteCommand.Reject);
+        SendRemote(RemoteCommand.Reject);
+        check(photo.Tier == Tier.None, "phone: pressing reject again takes it off");
+        _settings.AutoAdvance = autoAdvance;
+
+        ComparePhotos(_visible.Take(2).ToList());
+        await Task.Delay(1500);
+        _compareCells[0].ZoomAt(new Point(60, 60));
+        await Task.Delay(500);
+        check(_compareCells.All(c => c.Scroll.ZoomFactor > 2.5f), "double-click zooms every photo in comparison");
+        _compareCells[0].Scroll.ChangeView(80, 40, null, disableAnimation: true);
+        await Task.Delay(400);
+        check(_compareCells.All(c => c.Scroll.HorizontalOffset > 10), "a zoomed comparison can be moved around, in sync");
+        CompareClose_Click(this, new RoutedEventArgs());
+        check(!InCompare, "the close button leaves the comparison");
+
+        OpenLoupe(0);
+        await Task.Delay(1200);
+        SendRemote(RemoteCommand.View, "3:0.3:0.3");
+        await Task.Delay(3000);
+        check(InLoupe && LoupeScroll.ZoomFactor > 2.5f && LoupeScroll.HorizontalOffset > 0,
+            $"phone: pinch zooms the photo on screen (zoom {LoupeScroll.ZoomFactor:0.00})");
+        SendRemote(RemoteCommand.View, "1:0.5:0.5");
+        await Task.Delay(1200);
+        check(LoupeScroll.ZoomFactor <= 1.01f, "phone: pinching out fits the photo again");
+        CloseLoupe();
+
+        check(File.Exists(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Lumy.ico")) && TitleIcon.Source is not null, "app icon is in place");
     }
 
     /// <summary>The photo has the same gap on its left and right inside the viewer.</summary>

@@ -104,7 +104,7 @@ public sealed partial class MainWindow
         menu.Items.Add(new MenuFlyoutSeparator());
         Add("Лайк", "\uEB52", "F", () => RatePhotos(photos, Tier.Like));
         Add("Суперлайк", "\uE735", "R", () => RatePhotos(photos, Tier.SuperLike));
-        Add("Отказ", "\uE711", "X", () => RatePhotos(photos, Tier.Rejected));
+        Add("Отказ", "\uE8E0", "X", () => RatePhotos(photos, Tier.Rejected));
         Add("Снять оценку", "\uE894", "0", () => RatePhotos(photos, Tier.None));
         if (photos.Count >= 2)
             Add($"Сравнить ({Math.Min(photos.Count, MaxCompare)})", "\uE8A9", "C", () => ComparePhotos(photos));
@@ -130,6 +130,7 @@ public sealed partial class MainWindow
 
     private void RatePhotos(List<PhotoItem> photos, Tier tier)
     {
+        tier = Toggled(photos, tier);
         _ratings.Rate(photos, tier);
         UpdateCounter();
         if (InLoupe)

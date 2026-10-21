@@ -115,6 +115,9 @@ public enum RemoteCommand
     OverlayValue,
 
     OverlaySwap,
+
+    /// <summary>Pinch and drag on the phone: arg is "zoom:x:y", the zoom and the point of the photo in the middle of the screen, in fractions.</summary>
+    View,
 }
 
 /// <summary>A command with its argument, if it takes one.</summary>
@@ -190,6 +193,7 @@ public static class RemoteCommands
         ["overlay-mode"] = RemoteCommand.OverlayMode,
         ["overlay-value"] = RemoteCommand.OverlayValue,
         ["overlay-swap"] = RemoteCommand.OverlaySwap,
+        ["view"] = RemoteCommand.View,
     };
 
     public static bool TryParse(string? name, out RemoteCommand command) =>
