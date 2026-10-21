@@ -14,6 +14,11 @@ public class RemoteBasicsTests
     [InlineData("tournament", RemoteCommand.Tournament)]
     [InlineData("winners-super", RemoteCommand.WinnersSuperLike)]
     [InlineData("auto-advance", RemoteCommand.AutoAdvance)]
+    [InlineData("edit-set", RemoteCommand.EditSet)]
+    [InlineData("export", RemoteCommand.Export)]
+    [InlineData("album", RemoteCommand.AlbumOpen)]
+    [InlineData("album-move", RemoteCommand.AlbumMove)]
+    [InlineData("overlay-value", RemoteCommand.OverlayValue)]
     public void Parses_command_names(string name, RemoteCommand expected)
     {
         Assert.True(RemoteCommands.TryParse(name, out var command));
@@ -58,4 +63,14 @@ public class RemoteBasicsTests
     [Fact]
     public void Request_numbers_skip_junk() =>
         Assert.Equal([3L, 17L], new RemoteRequest(RemoteCommand.Compare, "3, x,17,").Numbers());
+
+    [Fact]
+    public void Request_values_split_on_colons()
+    {
+        var values = new RemoteRequest(RemoteCommand.EditCrop, "0.05:-0.1:x").Values();
+        Assert.Equal(3, values.Count);
+        Assert.Equal(0.05, values[0], 6);
+        Assert.Equal(-0.1, values[1], 6);
+        Assert.True(double.IsNaN(values[2]));
+    }
 }

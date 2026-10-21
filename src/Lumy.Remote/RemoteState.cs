@@ -7,7 +7,7 @@ public sealed record RemoteState
 {
     public static readonly RemoteState Empty = new();
 
-    /// <summary>"empty", "gallery", "loupe", "swipe", "swipe-done", "compare", "tournament" or "tournament-done".</summary>
+    /// <summary>"empty", "gallery", "loupe", "swipe", "swipe-done", "compare", "tournament", "tournament-done" or "editor".</summary>
     public string Mode { get; init; } = "empty";
 
     public long? PhotoId { get; init; }
@@ -61,7 +61,27 @@ public sealed record RemoteState
     public string? Message { get; init; }
 
     public int MessageId { get; init; }
+
+    /// <summary>The crop and sliders while the editor is open.</summary>
+    public RemoteEditor? Editor { get; init; }
+
+    /// <summary>Every album, newest first.</summary>
+    public IReadOnlyList<RemoteAlbum> Albums { get; init; } = [];
+
+    /// <summary>The album open in the gallery instead of a folder.</summary>
+    public RemoteAlbum? Album { get; init; }
+
+    /// <summary>In comparison: "wipe" or "fade" while two photos lie on top of each other, otherwise null.</summary>
+    public string? Overlay { get; init; }
+
+    /// <summary>Where the wipe is, or how much of the top photo shows, from 0 to 1.</summary>
+    public double OverlayValue { get; init; }
 }
+
+/// <summary>The editor's state: the crop shape and frame (x, y, width, height in fractions of the photo), every slider by name, and a line about the frame's size.</summary>
+public sealed record RemoteEditor(string Aspect, IReadOnlyList<double> Crop, IReadOnlyDictionary<string, double> Values, bool Before, bool CanPaste, string? Info);
+
+public sealed record RemoteAlbum(long Id, string Name, int Count);
 
 public sealed record RemotePhoto(long Id, string FileName, Tier Tier, string? Label = null);
 

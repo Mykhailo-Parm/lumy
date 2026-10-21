@@ -193,7 +193,15 @@ public sealed partial class MainWindow
             FullScreen = AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen,
             Message = _remoteMessage,
             MessageId = _remoteMessageId,
+            Albums = _database.Albums().Select(a => new RemoteAlbum(a.Id, a.Name, a.Count)).ToList(),
+            Album = _album is { } album ? new RemoteAlbum(album.Id, album.Name, _all.Count) : null,
         };
+
+        if (InEditor && _editorPhoto is { } edited)
+        {
+            var index = _visible.IndexOf(edited);
+            return Describe(edited, index + 1, _visible.Count, common with { Mode = "editor", Editor = RemoteEditorState() });
+        }
 
         if (InSwipe && _swipe is { } session)
         {
@@ -231,6 +239,8 @@ public sealed partial class MainWindow
                 Photos = _compareCells.Select((c, i) => ToRemote(c.Photo) with { Label = $"{i + 1}" }).ToList(),
                 Focus = _hoveredCell is { } cell ? _compareCells.IndexOf(cell) : -1,
                 Total = _compareCells.Count,
+                Overlay = InOverlay ? (_overlayFade ? "fade" : "wipe") : null,
+                OverlayValue = OverlaySlider.Value,
             };
 
         if (InLoupe && _loupeIndex >= 0 && _loupeIndex < _visible.Count)
@@ -268,9 +278,16 @@ public sealed partial class MainWindow
                 case RemoteCommand.OpenFolder: RemoteOpenFolder(request); return;
                 case RemoteCommand.Tournament: _ = RemoteTournamentAsync(request); return;
                 case RemoteCommand.Compare: _ = RemoteCompareAsync(request); return;
+                case RemoteCommand.Export: _ = RemoteExportAsync(request); return;
+                case RemoteCommand.AlbumOpen: _ = RemoteOpenAlbumAsync(request); return;
+                case RemoteCommand.AlbumNew: RemoteNewAlbum(request); return;
+                case RemoteCommand.AlbumAdd: RemoteAddToAlbum(request); return;
+                case RemoteCommand.AlbumClose: _ = RemoteCloseAlbumAsync(); return;
             }
 
-            if (InTournament)
+            if (InEditor)
+                HandleRemoteEditor(request);
+            else if (InTournament)
                 HandleRemoteTournament(request);
             else if (InSwipe)
                 HandleRemoteSwipe(request.Command);
@@ -338,6 +355,20 @@ public sealed partial class MainWindow
         var focus = _hoveredCell;
         switch (request.Command)
         {
+            case RemoteCommand.Overlay:
+                if (InOverlay)
+                    CloseOverlay();
+                else if (request.Numbers() is [var a, var b] && a >= 0 && b >= 0 && a < _compareCells.Count && b < _compareCells.Count && a != b)
+                    OpenOverlay(_compareCells[(int)Math.Min(a, b)], _compareCells[(int)Math.Max(a, b)]);
+                else
+                    ToggleOverlay();
+                break;
+            case RemoteCommand.OverlayMode when InOverlay: SetOverlayFade(request.Arg == "fade"); break;
+            case RemoteCommand.OverlayValue when InOverlay && request.Values() is [var value] && !double.IsNaN(value):
+                SetOverlayValue(value);
+                break;
+            case RemoteCommand.OverlaySwap when InOverlay: SwapOverlay(); break;
+            case RemoteCommand.Back when InOverlay: CloseOverlay(); break;
             case RemoteCommand.Pick when request.Numbers() is [var i] && i >= 0 && i < _compareCells.Count:
                 _compareCells[(int)i].Point();
                 break;
@@ -381,6 +412,9 @@ public sealed partial class MainWindow
             case RemoteCommand.Open when !InLoupe: OpenLoupe(Math.Max(Gallery.SelectedIndex, 0)); break;
             case RemoteCommand.Back: CloseLoupe(); break;
             case RemoteCommand.Zoom when InLoupe: _ = ToggleZoomAsync(); break;
+            case RemoteCommand.View when request.Values() is [var zoom, var x, var y] && !double.IsNaN(zoom + x + y):
+                _ = RemoteViewAsync(zoom, x, y);
+                break;
             case RemoteCommand.StartSwipe: StartSwipe(); break;
             case RemoteCommand.Filmstrip when InLoupe: ToggleFilmstrip(); break;
             case RemoteCommand.Goto when request.Numbers() is [var id]: RemoteGoto(id); break;
@@ -392,6 +426,20 @@ public sealed partial class MainWindow
                 var sortIndex = SortBox.Items.OfType<ComboBoxItem>().ToList().FindIndex(i => i.Tag as string == request.Arg);
                 if (sortIndex >= 0)
                     SortBox.SelectedIndex = sortIndex;
+                break;
+            case RemoteCommand.Edit:
+                if (request.Numbers() is [var editId] && _all.FirstOrDefault(p => p.Id == editId) is { } toEdit)
+                    _ = OpenEditorAsync(toEdit);
+                else
+                    EditCurrent();
+                break;
+            case RemoteCommand.AlbumRemove when _album is { } album:
+                var removeIds = request.Numbers().ToHashSet();
+                var toRemove = removeIds.Count > 0 ? _all.Where(p => removeIds.Contains(p.Id)).ToList() : CurrentPhotos();
+                RemoveFromAlbum(album, toRemove);
+                break;
+            case RemoteCommand.AlbumMove when request.Values() is [var moveId, var position] && _all.FirstOrDefault(p => p.Id == (long)moveId) is { } moved:
+                MoveInAlbum(moved, (int)position);
                 break;
             case RemoteCommand.Delete:
                 var ids = request.Numbers().ToHashSet();

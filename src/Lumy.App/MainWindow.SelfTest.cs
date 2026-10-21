@@ -142,6 +142,10 @@ public sealed partial class MainWindow
             }
 
             await RunRemoteChecksAsync(Check);
+            await RunEditorChecksAsync(Check);
+            await RunAlbumChecksAsync(Check);
+            await RunOverlayChecksAsync(Check);
+            await RunFeedbackChecksAsync(Check);
 
             Check(_settings.RecentFolders.FirstOrDefault() == folder, "folder is first in recent folders");
             Check(FilterBar.Items[0].Text.EndsWith(_all.Count.ToString(), StringComparison.Ordinal), $"filters show counts ({FilterBar.Items[0].Text})");
@@ -216,6 +220,212 @@ public sealed partial class MainWindow
         Send(RemoteCommand.AutoAdvance);
         check(CurrentRemoteState().AutoAdvance != before, "phone: toggles auto-advance");
         Send(RemoteCommand.AutoAdvance);
+    }
+
+    private void SendRemote(RemoteCommand command, string? arg = null) => HandleRemoteCommand(new RemoteRequest(command, arg));
+
+    private static string NewTestFolder(string name) =>
+        System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"lumy-self-test-{name}-{Guid.NewGuid():N}");
+
+    private double EditorCropRatio()
+    {
+        if (_editorSource is not { } source)
+            return 0;
+        var (_, _, width, height) = CropMath.ToPixels(_editorEdit.Crop, source.FullWidth, source.FullHeight);
+        return (double)width / height;
+    }
+
+    /// <summary>The editor and the export: a 4:5 crop with brighter exposure, saved, and written as a JPEG of that shape.</summary>
+    private async Task RunEditorChecksAsync(Action<bool, string> check)
+    {
+        SetFilter(TierFilter.All);
+        await Task.Delay(300);
+        Gallery.SelectedItems.Clear();
+        Gallery.SelectedIndex = 0;
+        var photo = _visible[0];
+        EditCurrent();
+        await Task.Delay(2500);
+        check(InEditor && _editorSource is not null && EditorImage.Source is Microsoft.UI.Xaml.Media.Imaging.WriteableBitmap, "editor opens with a preview");
+
+        SetEditorAspect(CropAspect.Portrait);
+        SetEditorSlider("exposure", 0.5);
+        await Task.Delay(800);
+        check(Math.Abs(EditorCropRatio() - 0.8) < 0.01, $"4:5 crop is 4:5 in pixels ({EditorCropRatio():0.000})");
+        check(EditorFrame.Visibility == Visibility.Visible && EditorFrame.ActualWidth > 0, "crop frame is drawn over the photo");
+        NudgeEditorCrop(0, 0, 0.6);
+        check(Math.Abs(EditorCropRatio() - 0.8) < 0.01, "scaling the frame keeps 4:5");
+        await FinishEditorAsync();
+        check(!InEditor && photo.Edit is { Aspect: CropAspect.Portrait, Exposure: 0.5 }, "editor saves the edit");
+        check(_database.GetEdits([photo.Id]).TryGetValue(photo.Id, out var stored) && stored.Aspect == CropAspect.Portrait, "edit is stored in the library");
+        check(BuildPhotoMenu([photo]).Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Any(i => i.Text == "Скопировать правки"), "right-click menu offers copying the edit");
+
+        var folder = NewTestFolder("export");
+        var written = await RunExportAsync([photo], new ExportOptions(folder, ExportSize.Instagram, 90, Originals: false, Numbered: false, OpenFolder: false));
+        var file = Directory.Exists(folder) ? Directory.GetFiles(folder).FirstOrDefault() : null;
+        var exported = file is null ? null : await PhotoDecoder.DecodeAsync(file, 0);
+        check(written == 1 && exported is not null, "export writes a JPEG");
+        if (exported is not null)
+            check(Math.Abs((double)exported.Width / exported.Height - 0.8) < 0.01 && exported.Width <= ExportPlan.InstagramWidth,
+                $"exported JPEG is 4:5 and at most 1080 wide ({exported.Width} × {exported.Height})");
+
+        var again = await RunExportAsync([photo], new ExportOptions(folder, ExportSize.Instagram, 90, Originals: false, Numbered: false, OpenFolder: false));
+        check(again == 1 && Directory.GetFiles(folder).Length == 2, "a second export never overwrites the first");
+
+        // The same from the phone.
+        SendRemote(RemoteCommand.Edit, photo.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        await Task.Delay(2500);
+        check(CurrentRemoteState() is { Mode: "editor", Editor.Aspect: "Portrait" }, "phone: opens the editor and sees the crop shape");
+        SendRemote(RemoteCommand.EditSet, "contrast:30");
+        check(_editorEdit.Contrast == 30 && CurrentRemoteState().Editor?.Values["contrast"] == 30, "phone: moves a slider");
+        SendRemote(RemoteCommand.EditAspect, "Square");
+        check(Math.Abs(EditorCropRatio() - 1) < 0.01, "phone: switches to 1:1");
+        var width = _editorEdit.Crop.Width;
+        SendRemote(RemoteCommand.EditCrop, "0:0:0.5");
+        SendRemote(RemoteCommand.EditCrop, "0.1:0:1");
+        check(Math.Abs(_editorEdit.Crop.Width - width / 2) < 0.01 && Math.Abs(EditorCropRatio() - 1) < 0.02, "phone: scales and moves the frame");
+        SendRemote(RemoteCommand.EditCancel);
+        await Task.Delay(500);
+        check(!InEditor && photo.Edit is { Contrast: 0, Aspect: CropAspect.Portrait }, "phone: cancel leaves the saved edit as it was");
+
+        try
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    /// <summary>Albums: made from a selection, shown in their own order, reordered, exported as linked originals.</summary>
+    private async Task RunAlbumChecksAsync(Action<bool, string> check)
+    {
+        var folderCount = _all.Count;
+        var picks = _visible.Take(3).ToList();
+        var album = CreateAlbum("Self-test", picks);
+        check(_database.Albums().Any(a => a.Id == album.Id && a.Count == 3), "album is made from three photos");
+        check(CurrentRemoteState().Albums.Any(a => a.Id == album.Id), "phone: sees the album");
+
+        await OpenAlbumAsync(album.Id);
+        await Task.Delay(1500);
+        check(_album?.Id == album.Id && _all.Count == 3 && AlbumBar.Visibility == Visibility.Visible, "album opens in the gallery");
+        check(Gallery.CanReorderItems && !SortBox.IsEnabled, "album photos can be dragged into order");
+
+        MoveInAlbum(_visible[0], 2);
+        check(_database.AlbumPhotos(album.Id).Select(r => r.Id).SequenceEqual(new[] { picks[1].Id, picks[2].Id, picks[0].Id }), "new order is saved");
+        SendRemote(RemoteCommand.AlbumMove, $"{picks[0].Id}:0");
+        check(_database.AlbumPhotos(album.Id)[0].Id == picks[0].Id, "phone: moves a photo in the album");
+
+        var folder = NewTestFolder("album");
+        var written = await RunExportAsync(_all.ToList(), new ExportOptions(folder, ExportSize.Full, 90, Originals: true, Numbered: true, OpenFolder: false));
+        var files = Directory.Exists(folder) ? Directory.GetFiles(folder).Select(f => System.IO.Path.GetFileName(f)).Order().ToList() : new List<string>();
+        check(written == 3 && files.Count == 3 && files[0].StartsWith("01_", StringComparison.Ordinal), $"album exports its originals in order ({string.Join(", ", files)})");
+
+        SendRemote(RemoteCommand.AlbumRemove, picks[1].Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        check(_all.Count == 2 && _database.AlbumPhotos(album.Id).Count == 2 && File.Exists(picks[1].Path), "phone: takes a photo out of the album, the file stays");
+
+        SendRemote(RemoteCommand.AlbumClose);
+        await Task.Delay(3000);
+        check(_album is null && _all.Count == folderCount && AlbumBar.Visibility == Visibility.Collapsed, "closing the album goes back to the folder");
+
+        SendRemote(RemoteCommand.AlbumOpen, album.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        await Task.Delay(1500);
+        check(CurrentRemoteState().Album is { Count: 2 }, "phone: opens the album");
+        SendRemote(RemoteCommand.AlbumClose);
+        await Task.Delay(3000);
+
+        _database.DeleteAlbum(album.Id);
+        check(_album is null && !_database.Albums().Any(a => a.Id == album.Id) && File.Exists(picks[0].Path), "album is deleted, photos stay");
+        try
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    /// <summary>Overlay: two photos on top of each other, wiped and faded, from the keyboard and the phone.</summary>
+    private async Task RunOverlayChecksAsync(Action<bool, string> check)
+    {
+        ComparePhotos(_visible.Take(3).ToList());
+        await Task.Delay(1500);
+        ToggleOverlay();
+        await Task.Delay(1500);
+        check(InOverlay && OverlayTop.Source is not null && OverlayBottom.Source is not null && CompareGrid.Visibility == Visibility.Collapsed, "overlay puts two photos on top of each other");
+
+        SetOverlayFade(false);
+        SetOverlayValue(0.3);
+        await Task.Delay(300);
+        check(OverlayTop.Clip is not null && OverlaySplit.Visibility == Visibility.Visible, "wipe clips the top photo");
+        SetOverlayFade(true);
+        await Task.Delay(300);
+        check(OverlayTop.Clip is null && Math.Abs(OverlayTop.Opacity - 0.3) < 0.01, "fade makes the top photo see-through");
+
+        var right = _overlayRight;
+        right?.Point();
+        RateHovered(Tier.Like);
+        check(right?.Photo.Tier == Tier.Like, "rating in the overlay rates the pointed photo");
+        UndoOrRedo(redo: false);
+
+        SendRemote(RemoteCommand.OverlayMode, "wipe");
+        SendRemote(RemoteCommand.OverlayValue, "0.7");
+        check(CurrentRemoteState() is { Overlay: "wipe" } state && Math.Abs(state.OverlayValue - 0.7) < 0.01, "phone: switches to the wipe and moves it");
+        var left = _overlayLeft;
+        SendRemote(RemoteCommand.OverlaySwap);
+        check(_overlayRight == left && _overlayLeft == right, "phone: swaps the photos");
+        SendRemote(RemoteCommand.Back);
+        await Task.Delay(500);
+        check(InCompare && !InOverlay && CompareGrid.Visibility == Visibility.Visible, "phone: back leaves the overlay for the grid");
+        SendRemote(RemoteCommand.Overlay, "0,2");
+        check(InOverlay && _overlayLeft == _compareCells[0] && _overlayRight == _compareCells[2], "phone: overlays the two photos it picked");
+        SendRemote(RemoteCommand.Back);
+        SendRemote(RemoteCommand.Back);
+        await Task.Delay(500);
+        check(!InCompare && !InOverlay, "phone: leaves the comparison");
+    }
+
+    /// <summary>Fixes from trying v0.6: toggled ratings, zoom and pan in comparison, the exit button, zoom from the phone, the icon.</summary>
+    private async Task RunFeedbackChecksAsync(Action<bool, string> check)
+    {
+        SetFilter(TierFilter.All);
+        await Task.Delay(300);
+        var autoAdvance = _settings.AutoAdvance;
+        _settings.AutoAdvance = false;
+        Gallery.SelectedItems.Clear();
+        Gallery.SelectedIndex = 5;
+        var photo = _visible[5];
+        Rate(Tier.Like);
+        var liked = photo.Tier == Tier.Like;
+        Rate(Tier.Like);
+        check(liked && photo.Tier == Tier.None, "pressing like again takes it off");
+        SendRemote(RemoteCommand.Reject);
+        SendRemote(RemoteCommand.Reject);
+        check(photo.Tier == Tier.None, "phone: pressing reject again takes it off");
+        _settings.AutoAdvance = autoAdvance;
+
+        ComparePhotos(_visible.Take(2).ToList());
+        await Task.Delay(1500);
+        _compareCells[0].ZoomAt(new Point(60, 60));
+        await Task.Delay(500);
+        check(_compareCells.All(c => c.Scroll.ZoomFactor > 2.5f), "double-click zooms every photo in comparison");
+        _compareCells[0].Scroll.ChangeView(80, 40, null, disableAnimation: true);
+        await Task.Delay(400);
+        check(_compareCells.All(c => c.Scroll.HorizontalOffset > 10), "a zoomed comparison can be moved around, in sync");
+        CompareClose_Click(this, new RoutedEventArgs());
+        check(!InCompare, "the close button leaves the comparison");
+
+        OpenLoupe(0);
+        await Task.Delay(1200);
+        SendRemote(RemoteCommand.View, "3:0.3:0.3");
+        await Task.Delay(3000);
+        check(InLoupe && LoupeScroll.ZoomFactor > 2.5f && LoupeScroll.HorizontalOffset > 0,
+            $"phone: pinch zooms the photo on screen (zoom {LoupeScroll.ZoomFactor:0.00})");
+        SendRemote(RemoteCommand.View, "1:0.5:0.5");
+        await Task.Delay(1200);
+        check(LoupeScroll.ZoomFactor <= 1.01f, "phone: pinching out fits the photo again");
+        CloseLoupe();
+
+        check(File.Exists(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Lumy.ico")) && TitleIcon.Source is not null, "app icon is in place");
     }
 
     /// <summary>The photo has the same gap on its left and right inside the viewer.</summary>

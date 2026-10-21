@@ -104,10 +104,24 @@ public sealed partial class MainWindow
         menu.Items.Add(new MenuFlyoutSeparator());
         Add("Лайк", "\uEB52", "F", () => RatePhotos(photos, Tier.Like));
         Add("Суперлайк", "\uE735", "R", () => RatePhotos(photos, Tier.SuperLike));
-        Add("Отказ", "\uE711", "X", () => RatePhotos(photos, Tier.Rejected));
+        Add("Отказ", "\uE8E0", "X", () => RatePhotos(photos, Tier.Rejected));
         Add("Снять оценку", "\uE894", "0", () => RatePhotos(photos, Tier.None));
         if (photos.Count >= 2)
             Add($"Сравнить ({Math.Min(photos.Count, MaxCompare)})", "\uE8A9", "C", () => ComparePhotos(photos));
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+        if (one)
+            Add("Кроп и цвет", "\uE70F", "E", () => _ = OpenEditorAsync(photos[0]));
+        if (one && photos[0].Edit is not null)
+            Add("Скопировать правки", "\uE8C8", null, () => CopyEdit(photos[0]));
+        if (_copiedEdit is not null)
+            Add(one ? "Вставить цвет" : $"Вставить цвет ({photos.Count})", "\uE77F", null, () => _ = PasteColourAsync(photos));
+        if (photos.Any(p => p.Edit is not null))
+            Add(one ? "Сбросить правки" : "Сбросить правки у выделенных", "\uE7A7", null, () => _ = ClearEditsAsync(photos));
+        Add(one ? "Экспорт…" : $"Экспорт ({photos.Count})…", "\uEDE1", "Ctrl+E", () => _ = ExportAsync(photos));
+        menu.Items.Add(AlbumMenu(photos));
+        if (_album is { } album)
+            Add("Убрать из альбома", "\uE738", null, () => RemoveFromAlbum(album, photos));
 
         menu.Items.Add(new MenuFlyoutSeparator());
         Add("Удалить в корзину", "\uE74D", "Delete", () => _ = DeletePhotosAsync(photos));
@@ -116,6 +130,7 @@ public sealed partial class MainWindow
 
     private void RatePhotos(List<PhotoItem> photos, Tier tier)
     {
+        tier = Toggled(photos, tier);
         _ratings.Rate(photos, tier);
         UpdateCounter();
         if (InLoupe)
@@ -249,12 +264,22 @@ public sealed partial class MainWindow
             return;
 
         var deleted = await Task.Run(() => photos.Where(MoveToRecycleBin).ToList());
-        var removed = deleted.ToHashSet();
+        RemoveFromGallery(deleted);
+        ShowToast(deleted.Count == photos.Count
+            ? (deleted.Count == 1 ? "Фото в корзине" : $"В корзине: {deleted.Count} фото")
+            : $"Удалено {deleted.Count} из {photos.Count}: остальные заняты другой программой или защищены");
+    }
+
+    /// <summary>Takes photos out of the gallery and the viewer, which then shows the next one.</summary>
+    private void RemoveFromGallery(IReadOnlyCollection<PhotoItem> photos)
+    {
+        var removed = photos.ToHashSet();
         var keepIndex = _loupeIndex;
         _all = _all.Where(p => !removed.Contains(p)).ToList();
-        foreach (var photo in deleted)
+        foreach (var photo in removed)
             _visible.Remove(photo);
         UpdateCounter();
+        UpdateAlbumBar();
         PublishRemotePhotos();
 
         if (InLoupe)
@@ -266,9 +291,6 @@ public sealed partial class MainWindow
         }
 
         EmptyState.Visibility = _all.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        ShowToast(deleted.Count == photos.Count
-            ? (deleted.Count == 1 ? "Фото в корзине" : $"В корзине: {deleted.Count} фото")
-            : $"Удалено {deleted.Count} из {photos.Count}: остальные заняты другой программой или защищены");
     }
 
     private static bool MoveToRecycleBin(PhotoItem photo)

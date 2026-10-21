@@ -302,4 +302,74 @@ public sealed partial class MainWindow
 
         return null;
     }
+
+    // ---------- Zoom from the phone ----------
+
+    private (double Zoom, double X, double Y)? _remoteView;
+    private bool _remoteViewLoading;
+
+    /// <summary>
+    /// Pinching and dragging on the phone shows the same part of the photo here, at full resolution. Moves that
+    /// arrive while the sharp image loads are folded into the last one.
+    /// </summary>
+    private async Task RemoteViewAsync(double zoom, double x, double y)
+    {
+        _remoteView = (zoom, Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1));
+        if (_remoteViewLoading)
+            return;
+
+        if (!InLoupe)
+        {
+            if (Gallery.SelectedIndex < 0)
+                return;
+            OpenLoupe(Gallery.SelectedIndex);
+        }
+
+        if (zoom > 1.01 && !_zoomedIn && _loupeIndex >= 0 && _loupeIndex < _visible.Count)
+        {
+            _remoteViewLoading = true;
+            try
+            {
+                var request = _loupeRequest;
+                var full = await LoupeImageCache.LoadFullResolutionAsync(_visible[_loupeIndex]);
+                if (full is not null && request == _loupeRequest)
+                {
+                    LoupeImage.Source = full;
+                    _zoomedIn = true;
+                }
+            }
+            finally
+            {
+                _remoteViewLoading = false;
+            }
+
+            // Let the sharp image take its place before measuring it.
+            await Task.Delay(60);
+        }
+
+        if (_remoteView is { } view)
+            ShowLoupeView(view.Zoom, view.X, view.Y);
+    }
+
+    /// <summary>Zooms the viewer to <paramref name="zoom"/> with the point (<paramref name="x"/>, <paramref name="y"/>) of the photo, in fractions, in the middle.</summary>
+    private void ShowLoupeView(double zoom, double x, double y)
+    {
+        if (zoom <= 1.01)
+        {
+            if (_zoomedIn)
+                _ = ToggleZoomAsync();
+            else
+                ResetZoom();
+            return;
+        }
+
+        if (LoupeImage.ActualWidth <= 0 || LoupeImage.ActualHeight <= 0)
+            return;
+
+        var origin = LoupeImage.TransformToVisual(LoupeCanvas).TransformPoint(new Point(0, 0));
+        var z = (float)Math.Clamp(zoom, 1, LoupeScroll.MaxZoomFactor);
+        var centerX = (origin.X + x * LoupeImage.ActualWidth) * z;
+        var centerY = (origin.Y + y * LoupeImage.ActualHeight) * z;
+        LoupeScroll.ChangeView(Math.Max(0, centerX - LoupeScroll.ActualWidth / 2), Math.Max(0, centerY - LoupeScroll.ActualHeight / 2), z, disableAnimation: true);
+    }
 }

@@ -30,7 +30,7 @@ public partial class App : Application
     {
         try
         {
-            // "Lumy.exe D:\Photos\Shoot" opens that folder; used by the Explorer context menu later on.
+            // "Lumy.exe D:\Photos\Shoot" opens that folder; the installer's "Открыть в Lumy" folder menu runs this.
             // "Lumy.exe --self-test D:\Photos" opens it, clicks through every view and exits (used by CI).
             var arguments = Environment.GetCommandLineArgs().Skip(1).ToList();
             var folder = arguments.FirstOrDefault(Directory.Exists);

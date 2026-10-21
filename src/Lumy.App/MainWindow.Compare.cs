@@ -1,7 +1,9 @@
 using Lumy.Core;
 using Microsoft.UI;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.System;
 
@@ -66,6 +68,7 @@ public sealed partial class MainWindow
 
     private void CloseCompare()
     {
+        CloseOverlay();
         var focus = _hoveredCell?.Photo ?? (_compareCells.Count == 1 ? _compareCells[0].Photo : null);
         CompareView.Visibility = Visibility.Collapsed;
         CompareGrid.Children.Clear();
@@ -82,6 +85,8 @@ public sealed partial class MainWindow
         Gallery.Focus(FocusState.Programmatic);
     }
 
+    private void CompareClose_Click(object sender, RoutedEventArgs e) => CloseCompare();
+
     private bool HandleCompareKey(VirtualKey key, bool ctrl)
     {
         if (ctrl)
@@ -96,6 +101,9 @@ public sealed partial class MainWindow
             return false;
         }
 
+        if (InOverlay && HandleOverlayKey(key))
+            return true;
+
         if (key is >= VirtualKey.Number1 and <= VirtualKey.Number9 || key is >= VirtualKey.NumberPad1 and <= VirtualKey.NumberPad9)
         {
             var n = key >= VirtualKey.NumberPad1 ? key - VirtualKey.NumberPad1 : key - VirtualKey.Number1;
@@ -109,6 +117,7 @@ public sealed partial class MainWindow
             case VirtualKey.R: RateHovered(Tier.SuperLike); return true;
             case VirtualKey.X: RateHovered(Tier.Rejected); return true;
             case VirtualKey.Number0 or VirtualKey.NumberPad0: RateHovered(Tier.None); return true;
+            case VirtualKey.O: ToggleOverlay(); return true;
             case VirtualKey.L:
                 _syncCompare = !_syncCompare;
                 UpdateCompareInfo();
@@ -129,8 +138,11 @@ public sealed partial class MainWindow
             return;
         }
 
+        tier = Toggled([cell.Photo], tier);
         _ratings.Rate([cell.Photo], tier);
         RefreshCompareBadges();
+        if (InOverlay)
+            Flash(tier);
     }
 
     private void RemoveFromCompare(int index)
@@ -138,6 +150,7 @@ public sealed partial class MainWindow
         if (index < 0 || index >= _compareCells.Count || _compareCells.Count == 1)
             return;
 
+        CloseOverlay();
         if (_hoveredCell == _compareCells[index])
             _hoveredCell = null;
         _compareCells.RemoveAt(index);
@@ -148,6 +161,7 @@ public sealed partial class MainWindow
 
     private void BuildCompare(IReadOnlyList<PhotoItem> photos)
     {
+        CloseOverlay();
         CompareGrid.Children.Clear();
         _compareCells.Clear();
         _hoveredCell = null;
@@ -193,7 +207,9 @@ public sealed partial class MainWindow
 
     private void UpdateCompareInfo()
     {
-        CompareInfo.Text = $"{_compareCells.Count} фото  ·  синхронный зум {(_syncCompare ? "вкл" : "выкл")}";
+        CompareInfo.Text = InOverlay && _overlayLeft is { } left && _overlayRight is { } right
+            ? $"Наложение {_compareCells.IndexOf(left) + 1} и {_compareCells.IndexOf(right) + 1}  ·  {(_overlayFade ? "прозрачность" : "шторка")}"
+            : $"{_compareCells.Count} фото  ·  синхронный зум {(_syncCompare ? "вкл" : "выкл")}";
         PushRemoteState();
     }
 
@@ -226,6 +242,7 @@ public sealed partial class MainWindow
         private readonly TextBlock _number = new() { FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         private readonly FontIcon _tier = new() { FontSize = 14 };
         private int _decodedWidth;
+        private (Windows.Foundation.Point Start, double Horizontal, double Vertical)? _pan;
 
         public CompareCell(MainWindow owner, PhotoItem photo)
         {
@@ -249,6 +266,17 @@ public sealed partial class MainWindow
                 _canvas.Height = e.NewSize.Height;
             };
             Scroll.ViewChanged += (_, _) => _owner.OnCompareViewChanged(this);
+
+            // As in the viewer: drag a zoomed photo with the mouse to look around it; double-click zooms in and back.
+            Scroll.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(StartPan), handledEventsToo: true);
+            Scroll.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(Pan), handledEventsToo: true);
+            Scroll.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(EndPan), handledEventsToo: true);
+            Scroll.PointerCaptureLost += (_, _) => _pan = null;
+            Scroll.DoubleTapped += (_, e) =>
+            {
+                ZoomAt(e.GetPosition(Scroll));
+                e.Handled = true;
+            };
 
             var label = new Border
             {
@@ -282,6 +310,47 @@ public sealed partial class MainWindow
         }
 
         public PhotoItem Photo { get; }
+
+        private void StartPan(object sender, PointerRoutedEventArgs e)
+        {
+            var point = e.GetCurrentPoint(Scroll);
+            if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse || !point.Properties.IsLeftButtonPressed || Scroll.ZoomFactor <= 1.01f)
+                return;
+
+            _pan = (point.Position, Scroll.HorizontalOffset, Scroll.VerticalOffset);
+            Scroll.CapturePointer(e.Pointer);
+        }
+
+        private void Pan(object sender, PointerRoutedEventArgs e)
+        {
+            if (_pan is not { } pan)
+                return;
+
+            var position = e.GetCurrentPoint(Scroll).Position;
+            Scroll.ChangeView(pan.Horizontal - (position.X - pan.Start.X), pan.Vertical - (position.Y - pan.Start.Y), null, disableAnimation: true);
+        }
+
+        private void EndPan(object sender, PointerRoutedEventArgs e)
+        {
+            if (_pan is null)
+                return;
+
+            _pan = null;
+            Scroll.ReleasePointerCapture(e.Pointer);
+        }
+
+        /// <summary>Zooms 3× around <paramref name="p"/>, or back to the whole photo when already zoomed.</summary>
+        public void ZoomAt(Windows.Foundation.Point p)
+        {
+            if (Scroll.ZoomFactor > 1.01f)
+            {
+                Scroll.ChangeView(0, 0, 1f, disableAnimation: true);
+                return;
+            }
+
+            const float zoom = 3f;
+            Scroll.ChangeView(p.X * (zoom - 1), p.Y * (zoom - 1), zoom, disableAnimation: true);
+        }
 
         /// <summary>Makes this the photo F, R, X and 0 rate: under the mouse, or picked on the phone.</summary>
         public void Point()

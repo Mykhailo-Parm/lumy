@@ -98,6 +98,33 @@ public sealed class AppSettings(LibraryDatabase database)
         set => database.SetSetting("window_placement", value ?? "");
     }
 
+    /// <summary>Where exports go; null until the first export picks the Pictures folder.</summary>
+    public string? ExportFolder
+    {
+        get => database.GetSetting("export_folder") is { Length: > 0 } folder ? folder : null;
+        set => database.SetSetting("export_folder", value ?? "");
+    }
+
+    public ExportSize ExportSize
+    {
+        get => Enum.TryParse<ExportSize>(database.GetSetting("export_size"), out var size) ? size : ExportSize.Instagram;
+        set => database.SetSetting("export_size", value.ToString());
+    }
+
+    /// <summary>JPEG quality for exports, 60 to 100.</summary>
+    public int ExportQuality
+    {
+        get => int.TryParse(database.GetSetting("export_quality"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var q) ? Math.Clamp(q, 60, 100) : 92;
+        set => database.SetSetting("export_quality", Math.Clamp(value, 60, 100).ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>Open the export folder in Explorer when an export finishes.</summary>
+    public bool ExportOpenFolder
+    {
+        get => GetBool("export_open_folder", true);
+        set => database.SetSetting("export_open_folder", value.ToString());
+    }
+
     private bool GetBool(string key, bool fallback) =>
         bool.TryParse(database.GetSetting(key), out var value) ? value : fallback;
 }
