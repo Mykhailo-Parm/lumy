@@ -1,5 +1,7 @@
 <Project>
   <PropertyGroup>
+    <!-- The app's version, shown in the installer and in Windows' list of installed apps. -->
+    <Version>0.6.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

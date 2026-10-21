@@ -59,8 +59,47 @@ jobs:
             Format-List TimeCreated, ProviderName, Message
           exit 1
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Q "/DAppVersion=$version" "/DSourceDir=$pwd\artifacts\Lumy-win-x64" installer\Lumy.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem artifacts\Lumy-Setup-*.exe | Format-Table Name, Length
+
+      - name: Installer check (install, start, uninstall)
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem artifacts\Lumy-Setup-*.exe | Select-Object -First 1).FullName
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=foldermenu' -Wait
+          $dir = "$env:LOCALAPPDATA\Programs\Lumy"
+          $menu = 'HKCU:\Software\Classes\Directory\shell\Lumy\command'
+          if (-not (Test-Path "$dir\Lumy.exe")) { "Lumy.exe was not installed"; exit 1 }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Lumy.lnk")) { "No Start menu shortcut"; exit 1 }
+          if (-not (Test-Path $menu)) { "No 'Open in Lumy' folder menu"; exit 1 }
+          "Folder menu runs: " + (Get-ItemProperty $menu).'(default)'
+
+          $app = Start-Process "$dir\Lumy.exe" -PassThru
+          Start-Sleep 10
+          if ($app.HasExited) { "The installed Lumy closed right after starting (exit code $($app.ExitCode))"; exit 1 }
+          Stop-Process $app -Force
+          Start-Sleep 2
+
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          for ($i = 0; $i -lt 30 -and (Test-Path "$dir\Lumy.exe"); $i++) { Start-Sleep 1 }
+          if (Test-Path "$dir\Lumy.exe") { "Uninstall left Lumy.exe behind"; exit 1 }
+          if (Test-Path $menu) { "Uninstall left the folder menu behind"; exit 1 }
+          "Installed, started and uninstalled cleanly"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: Lumy-win-x64
           path: artifacts/Lumy-win-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumy-Setup
+          path: artifacts/Lumy-Setup-*.exe
