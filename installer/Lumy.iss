@@ -1,4 +1,5 @@
-; Lumy setup: per-user install, no administrator rights needed.
+; Lumy setup: installs for the current user by default (no administrator rights needed), or for everyone if chosen;
+; the folder can be changed on the "Select Destination Location" page.
 ; Built in CI with: ISCC.exe /DAppVersion=0.6.0 /DSourceDir=<publish folder> installer\Lumy.iss
 
 #ifndef AppVersion
@@ -15,11 +16,12 @@ AppVersion={#AppVersion}
 AppVerName=Lumy {#AppVersion}
 AppPublisher=Mykhailo Parm
 AppPublisherURL=https://github.com/Mykhailo-Parm/lumy
-DefaultDirName={localappdata}\Programs\Lumy
+DefaultDirName={autopf}\Lumy
 DefaultGroupName=Lumy
 DisableProgramGroupPage=yes
-DisableDirPage=yes
+DisableDirPage=no
 PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog commandline
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
@@ -55,17 +57,17 @@ Name: "foldermenu"; Description: "{cm:FolderMenu}"
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{userprograms}\Lumy"; Filename: "{app}\Lumy.exe"
-Name: "{userdesktop}\Lumy"; Filename: "{app}\Lumy.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Lumy"; Filename: "{app}\Lumy.exe"
+Name: "{autodesktop}\Lumy"; Filename: "{app}\Lumy.exe"; Tasks: desktopicon
 
 [Registry]
 ; Right-click a folder, or the empty space inside one, in Explorer: "Открыть в Lumy".
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\Lumy"; ValueType: string; ValueData: "{cm:OpenInLumy}"; Flags: uninsdeletekey; Tasks: foldermenu
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\Lumy"; ValueName: "Icon"; ValueType: string; ValueData: """{app}\Lumy.exe"",0"; Tasks: foldermenu
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\Lumy\command"; ValueType: string; ValueData: """{app}\Lumy.exe"" ""%1"""; Tasks: foldermenu
-Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Lumy"; ValueType: string; ValueData: "{cm:OpenInLumy}"; Flags: uninsdeletekey; Tasks: foldermenu
-Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Lumy"; ValueName: "Icon"; ValueType: string; ValueData: """{app}\Lumy.exe"",0"; Tasks: foldermenu
-Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\Lumy\command"; ValueType: string; ValueData: """{app}\Lumy.exe"" ""%V"""; Tasks: foldermenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Lumy"; ValueType: string; ValueData: "{cm:OpenInLumy}"; Flags: uninsdeletekey; Tasks: foldermenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Lumy"; ValueName: "Icon"; ValueType: string; ValueData: """{app}\Lumy.exe"",0"; Tasks: foldermenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Lumy\command"; ValueType: string; ValueData: """{app}\Lumy.exe"" ""%1"""; Tasks: foldermenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Lumy"; ValueType: string; ValueData: "{cm:OpenInLumy}"; Flags: uninsdeletekey; Tasks: foldermenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Lumy"; ValueName: "Icon"; ValueType: string; ValueData: """{app}\Lumy.exe"",0"; Tasks: foldermenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Lumy\command"; ValueType: string; ValueData: """{app}\Lumy.exe"" ""%V"""; Tasks: foldermenu
 
 [Run]
 Filename: "{app}\Lumy.exe"; Description: "{cm:LaunchLumy}"; Flags: nowait postinstall skipifsilent
