@@ -73,8 +73,11 @@ jobs:
         shell: pwsh
         run: |
           $setup = (Get-ChildItem artifacts\Lumy-Setup-*.exe | Select-Object -First 1).FullName
-          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/TASKS=foldermenu', "/DIR=$env:RUNNER_TEMP\My Apps\Lumy" -Wait
+          # A folder with a space in it, picked instead of the default, like a user would on the folder page.
           $dir = "$env:RUNNER_TEMP\My Apps\Lumy"
+          $log = "$env:RUNNER_TEMP\setup.log"
+          Start-Process $setup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /TASKS=foldermenu `"/DIR=$dir`" `"/LOG=$log`"" -Wait
+          if (-not (Test-Path "$dir\Lumy.exe") -and (Test-Path $log)) { Get-Content $log -Tail 40 }
           $menu = 'HKCU:\Software\Classes\Directory\shell\Lumy\command'
           if (-not (Test-Path "$dir\Lumy.exe")) { "Lumy.exe was not installed"; exit 1 }
           if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Lumy.lnk")) { "No Start menu shortcut"; exit 1 }
